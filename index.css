@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+/* Sınıf tabanlı karanlık mod (html.dark) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* index.html içindeki inline stillerle aynı — bundle yüklendiğinde sıçrama olmasın */
+html {
+  background-color: #fdfbf7;
+}
+html.dark {
+  background-color: #171412;
+}
+body,
+#root {
+  background-color: inherit;
+}
+
+@theme {
+  --color-cream-50: #fdfbf7;
+  --color-cream-100: #fbf7f0;
+  --color-cream-200: #f5efe0;
+  --color-cream-300: #ebe0cc;
+  --color-cream-800: #5c5446;
+  --color-cream-900: #3d382e;
+
+  --color-sand-300: #e3d5bc;
+  --color-sand-400: #dcccb0;
+  --color-sand-500: #d4c5a9;
+  --color-sand-600: #c2b295;
+
+  --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", ui-serif, Georgia, serif;
+
+  --animate-blob: blob 10s infinite;
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-pulse-slow: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes blob {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  33% {
+    transform: translate(30px, -50px) scale(1.1);
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.9);
+  }
+  100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
+/* Tauri/WebView2: belge ve iç içe panellerde kaydırma */
+html {
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+#root {
+  min-height: 100%;
+}
+
+.scroll-y-pan {
+  overflow-y: auto;
+  overflow-x: hidden;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Thin, elegant scrollbar for settings panels */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(168, 162, 158, 0.3) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 5px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(168, 162, 158, 0.3);
+  border-radius: 9999px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(168, 162, 158, 0.5);
+}
+.dark .scrollbar-thin {
+  scrollbar-color: rgba(120, 113, 108, 0.3) transparent;
+}
+.dark .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(120, 113, 108, 0.3);
+}
+.dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 113, 108, 0.5);
+}
+
+@supports (-webkit-touch-callout: none) {
+  .h-screen {
+    height: -webkit-fill-available;
+  }
+}

@@ -1,0 +1,22 @@
+[package]
+name = "quizlab-med"
+version = "1.0.0"
+description = "QuizLab Med"
+authors = ["QuizLab"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rfd = "0.16"
+base64 = "0.22"
+tokio = { version = "=1.40.0", features = ["process", "io-util", "time", "macros", "sync"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

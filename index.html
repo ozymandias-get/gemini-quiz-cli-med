@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="tr" class="dark scroll-smooth overflow-x-hidden">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>QuizLab</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E🧪%3C/text%3E%3C/svg%3E" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap" rel="stylesheet">
+    <!-- İlk boyamadan önce çalışır: Tailwind/JS gelmeden tema + arka plan (beyaz flaş önleme) -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('darkMode');
+          var dark = stored === null ? true : stored === 'true';
+          document.documentElement.classList.toggle('dark', dark);
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      /* Varsayılan koyu; JS açık tema seçildiyse .dark kaldırılır */
+      html {
+        background-color: #171412;
+        color-scheme: dark;
+      }
+      html.dark {
+        background-color: #171412;
+        color-scheme: dark;
+      }
+      html:not(.dark) {
+        background-color: #fdfbf7;
+        color-scheme: light;
+      }
+      body,
+      #root {
+        margin: 0;
+        min-height: 100%;
+        background-color: inherit;
+      }
+    </style>
+  </head>
+  <body class="bg-cream-50 text-stone-800 antialiased selection:bg-sand-500 selection:text-white dark:bg-[#171412] dark:text-stone-100 dark:selection:bg-sand-500/35 dark:selection:text-stone-100 transition-colors duration-500 overflow-x-hidden">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

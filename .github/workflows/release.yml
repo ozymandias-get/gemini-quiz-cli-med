@@ -1,0 +1,86 @@
+# -----------------------------------------------------------------------------
+# Tauri v2 — GitHub Release pipeline
+#
+# Tetikleyici: Yalnızca v ile başlayan etiket push'unda çalışır (örn. v1.0.0, v2.1.3).
+# İzinler: Release oluşturma ve varlık yükleme için contents:write yeterlidir;
+#          GITHUB_TOKEN ile birlikte kullanılır (ek PAT gerekmez).
+#
+# Matris: ubuntu-22.04 (Linux: .deb, AppImage) ve windows-latest (NSIS .exe, MSI)
+#         aynı anda çalışır; fail-fast: false ile biri hata verse diğeri iptal olmaz.
+#         İki job aynı tagName ile aynı GitHub Release'e varlık ekler.
+#
+# Sürüm notu: Yayın etiketi (örn. v1.0.0) ile uygulama sürümünü hizalamak için
+#             tauri.conf.json, src-tauri/Cargo.toml ve package.json içindeki
+#             version alanlarını etiketle uyumlu güncellemek iyi uygulamadır;
+#             bu iş akışı bunu otomatik yapmaz.
+#
+# tauriScript vs args: tauri-action, `${tauriScript} build` çalıştırır. Burada
+#   npx tauri → npm ci sonrası yerel @tauri-apps/cli ile tauri build yapar;
+#   tauri.conf.json içindeki beforeBuildCommand (npm run build) bu sırada tetiklenir.
+#   args yalnızca tauri build komutuna ek argümanlar içindir (--verbose, --target vb.).
+# -----------------------------------------------------------------------------
+
+name: Release
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+
+      # Tauri Linux derlemesi için gerekli sistem paketleri (yalnızca Ubuntu runner)
+      - name: Install Linux system dependencies (Tauri)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Build Tauri app and publish GitHub Release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: QuizLab Med ${{ github.ref_name }}
+          tauriScript: npx tauri
