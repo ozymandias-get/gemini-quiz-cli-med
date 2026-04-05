@@ -18,6 +18,8 @@
 #   npx tauri → npm ci sonrası yerel @tauri-apps/cli ile tauri build yapar;
 #   tauri.conf.json içindeki beforeBuildCommand (npm run build) bu sırada tetiklenir.
 #   args yalnızca tauri build komutuna ek argümanlar içindir (--verbose, --target vb.).
+#
+# tauri-action: GitHub'da v1 etiketi yok; resmi sürümler v0.6.x (Tauri v2 ile uyumlu).
 # -----------------------------------------------------------------------------
 
 name: Release
@@ -77,7 +79,7 @@ jobs:
             librsvg2-dev
 
       - name: Build Tauri app and publish GitHub Release
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
