@@ -1,7 +1,3 @@
-<div align="center">
-<img width="1200" height="475" alt="QuizLab Med: PDF ders notlarından yapay zeka ile sınav üreten Tauri masaüstü uygulaması" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
-
 **Diller:** [Türkçe](README.tr.md) · [English](README.md)
 
 # QuizLab Med — PDF’ten yapay zeka ile özelleştirilebilir sınav
