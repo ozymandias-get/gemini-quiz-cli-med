@@ -13,7 +13,8 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rfd = "0.16"
+# tauri-plugin-dialog varsayılanı rfd/gtk3; rfd'nin varsayılanı xdg-portal — ikisi birden build'i bozar.
+rfd = { version = "0.16", default-features = false, features = ["gtk3"] }
 base64 = "0.22"
 tokio = { version = "=1.40.0", features = ["process", "io-util", "time", "macros", "sync"] }
 
