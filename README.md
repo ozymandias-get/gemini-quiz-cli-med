@@ -71,20 +71,35 @@ flowchart LR
 ```
 
 - **Frontend:** React 19 + Vite 6 + Tailwind 4; state with **Zustand**; motion with **Framer Motion**.
-- **Bridge:** TypeScript calls `runGeminiCli` in `services/gemini/cli.ts`, which `invoke`s the Rust command `gemini_run` with model id, stdin payload, and prompt tail.
+- **Bridge:** TypeScript calls `runGeminiCli` in `src/services/gemini/cli.ts`, which `invoke`s the Rust command `gemini_run` with model id, stdin payload, and prompt tail.
 - **Rust:** Spawns/monitors the `gemini` (or `npx`) process; supports **abort** for long runs (`abort_gemini_run`).
+
+### PDF command format
+
+For full-PDF analysis mode, the CLI call is normalized to this shape:
+
+```bash
+gemini "[SHORT_STDIN_HINT]" --file "[PDF_PATH]" --non-interactive --model "[MODEL_FROM_SETTINGS]"
+```
+
+- The first positional argument is now a short, fixed hint.
+- The full analysis context (rules/instructions) is sent via stdin to avoid command-length limits.
+- The PDF path is passed via `--file`.
+- `--non-interactive` is always set for unattended execution.
+- The model is not hardcoded; it comes from user quiz settings.
 
 ## Project layout
 
 | Path | Role |
 |------|------|
-| `App.tsx`, `index.tsx` | App shell, routing, error boundary |
-| `views/` | Screens: landing, config, generating, quiz, flashcards, results |
-| `components/` | Forms, quiz UI, modals, quiz-config blocks |
-| `services/` | PDF (`pdfService`, `pdfjsWorker`), flows (`appFlows`), Gemini (`gemini/`, `geminiService`) |
-| `store/` | Global state: generation, quiz session, settings, CLI status, routing |
-| `constants/` | Translations, PDF limits, demo data |
-| `utils/` | Text helpers, parsing AI output, toasts |
+| `src/App.tsx`, `src/index.tsx` | App shell, routing, error boundary |
+| `src/views/` | Screens: landing, config, generating, quiz, flashcards, results |
+| `src/components/` | Forms, quiz UI, modals, quiz-config blocks |
+| `src/services/` | PDF (`pdfService`, `pdfjsWorker`), flows (`appFlows`), Gemini (`gemini/`) |
+| `src/store/` | Global state: generation, quiz session, settings, CLI status, routing |
+| `src/constants/` | Translations, PDF limits, demo data |
+| `src/utils/` | Text helpers, parsing AI output, toasts |
+| `src/types/` | Shared app types (`index.ts`) |
 | `src-tauri/` | Tauri 2 Rust project, icons, `tauri.conf.json` |
 
 ## Tech stack
@@ -106,7 +121,7 @@ flowchart LR
   gemini --version
   ```
 
-  The app resolves `gemini` / `gemini.cmd` first; if missing, it uses **`npx -y @google/gemini-cli`**. Keep **Node** and **`npx` on PATH** — shortcuts that launch the built `.exe` may not see a global npm prefix; the `npx` path is the usual fix. Authenticate the CLI with your **Google account** or **API key** per [Gemini CLI](https://github.com/google-gemini/gemini-cli) docs.
+  The desktop app expects a real `gemini` / `gemini.cmd` installation on PATH and runs it in headless mode with `--prompt` plus `--output-format`. Complete the interactive `gemini` sign-in flow once on that machine, then return to the app.
 
 - **Optional:** `cargo install tauri-cli` to use `cargo tauri` directly; otherwise the repo uses **`npx @tauri-apps/cli`** via npm scripts.
 
@@ -168,8 +183,8 @@ Artifacts appear under:
 
 | Symptom | What to try |
 |--------|-------------|
-| “CLI not found” / generation never starts | Run `gemini --version` in a normal shell; reinstall CLI; ensure `npx` works: `npx -y @google/gemini-cli --version`. |
-| Works in terminal but not from app shortcut | PATH differs for GUI processes; add Node/npm to system PATH or rely on `npx` fallback. |
+| “CLI not found” / generation never starts | Run `gemini --version` in a normal shell; reinstall the CLI; confirm the global npm bin path is visible to desktop apps. |
+| Works in terminal but not from app shortcut | PATH differs for GUI processes; add the global Node/npm bin directories to the system PATH so the app can find `gemini`. |
 | `invoke` / Tauri errors in browser | You ran `npm run dev` — use `npm run tauri:dev`. |
 | PDF rejected | Check **20 MB** and **500 page** caps; split or compress the PDF. |
 | Slow or timed-out generation | Use a faster model tier in settings; reduce question count; shorten focus scope. |

@@ -1,7 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod pdf_runtime;
+
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use pdf_runtime::{
+    extract_pdf_document, extract_pdf_document_payload, pdf_bootstrap_runtime, pdf_hybrid_start,
+    pdf_hybrid_stop, pdf_runtime_status, read_pdf_file_info, PdfRuntimeState,
+};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -10,9 +17,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command as TokioCommand;
 use tokio::sync::Mutex;
 
-/// Uzun süren `gemini` sürecini iptal için takip eder.
-/// `Child` mutex içinde bekletilirse `wait` ile aynı anda `kill` deadlock üretebileceği için
-/// iptal yolu PID + platform `kill` / `taskkill` kullanır (`Child::kill` ile eşdeğer sonuç).
 #[derive(Clone)]
 struct GeminiRunState {
     active_pid: Arc<Mutex<Option<u32>>>,
@@ -34,7 +38,6 @@ impl GeminiRunState {
     }
 }
 
-/// Çalışan OS sürecini zorla sonlandırır (`tokio::process::Child::kill` ile aynı amaç).
 fn kill_pid(pid: u32) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -48,7 +51,7 @@ fn kill_pid(pid: u32) -> std::io::Result<()> {
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("kill çıkış kodu: {status}"),
+                format!("kill cikis kodu: {status}"),
             ))
         }
     }
@@ -59,13 +62,12 @@ fn kill_pid(pid: u32) -> std::io::Result<()> {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()?;
-        // 128: süreç bulunamadı — zaten bitmiş olabilir, iptal için sorun değil
         if status.success() || status.code() == Some(128) {
             Ok(())
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("taskkill çıkış kodu: {status}"),
+                format!("taskkill cikis kodu: {status}"),
             ))
         }
     }
@@ -77,9 +79,82 @@ struct GeminiCliStatus {
     installed: bool,
     version: Option<String>,
     is_dev_build: bool,
+    is_authenticated: bool,
+    is_headless_ready: bool,
+    status_message: Option<String>,
 }
 
-/// Yalnızca global `gemini` / `gemini.cmd` (npx fallback değil).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GeminiCliRequest {
+    model: String,
+    prompt: String,
+    stdin_content: Option<String>,
+    response_mode: String,
+    timeout_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeminiCliEnvelope {
+    response: Option<String>,
+    error: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadPdfFileResponse {
+    base64: String,
+    file_name: String,
+}
+
+const ALLOWED_GEMINI_MODELS: &[&str] = &[
+    "gemini-3.1-pro-preview",
+    "gemini-2.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview",
+];
+
+fn build_augmented_windows_path() -> Option<String> {
+    if !cfg!(target_os = "windows") {
+        return None;
+    }
+
+    let mut path_parts: Vec<String> = std::env::var("PATH")
+        .unwrap_or_default()
+        .split(';')
+        .filter(|part| !part.trim().is_empty())
+        .map(|part| part.to_string())
+        .collect();
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        path_parts.push(format!("{appdata}\\npm"));
+    }
+    if let Ok(program_files) = std::env::var("ProgramFiles") {
+        path_parts.push(format!("{program_files}\\nodejs"));
+    }
+    if let Ok(program_files_x86) = std::env::var("ProgramFiles(x86)") {
+        path_parts.push(format!("{program_files_x86}\\nodejs"));
+    }
+    Some(path_parts.join(";"))
+}
+
+fn apply_windows_path(command: &mut Command) {
+    if let Some(path) = build_augmented_windows_path() {
+        command.env("PATH", path);
+    }
+}
+
+fn apply_windows_path_tokio(command: &mut TokioCommand) {
+    if let Some(path) = build_augmented_windows_path() {
+        command.env("PATH", path);
+    }
+}
+
+fn gemini_working_dir() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("quizlab-med-gemini-headless");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Gecici Gemini dizini olusturulamadi: {e}"))?;
+    Ok(dir)
+}
+
 fn check_global_gemini_version() -> (bool, Option<String>) {
     let candidates: &[&str] = if cfg!(target_os = "windows") {
         &["gemini", "gemini.cmd"]
@@ -87,26 +162,24 @@ fn check_global_gemini_version() -> (bool, Option<String>) {
         &["gemini"]
     };
 
-    for prog in candidates {
-        let output = Command::new(prog)
-            .arg("--version")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output();
+    for program in candidates {
+        let mut command = Command::new(program);
+        command.arg("--version").stdout(Stdio::piped()).stderr(Stdio::piped());
+        apply_windows_path(&mut command);
 
-        if let Ok(out) = output {
-            if out.status.success() {
-                let mut s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if s.is_empty() {
-                    s = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        if let Ok(output) = command.output() {
+            if output.status.success() {
+                let mut version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if version.is_empty() {
+                    version = String::from_utf8_lossy(&output.stderr).trim().to_string();
                 }
-                let short: String = s.chars().take(120).collect();
+                let short_version: String = version.chars().take(120).collect();
                 return (
                     true,
-                    if short.is_empty() {
+                    if short_version.is_empty() {
                         None
                     } else {
-                        Some(short)
+                        Some(short_version)
                     },
                 );
             }
@@ -116,18 +189,106 @@ fn check_global_gemini_version() -> (bool, Option<String>) {
     (false, None)
 }
 
+fn extract_json_object_slice(content: &str) -> Result<&str, String> {
+    let start = content.find('{').ok_or_else(|| "Gemini CLI ciktisinda JSON baslangici bulunamadi.".to_string())?;
+    let end = content.rfind('}').ok_or_else(|| "Gemini CLI ciktisinda JSON sonu bulunamadi.".to_string())?;
+    if end < start {
+        return Err("Gemini CLI JSON sinirlari gecersiz.".to_string());
+    }
+    Ok(&content[start..=end])
+}
+
+fn looks_like_auth_error(message: &str) -> bool {
+    let lowercase = message.to_ascii_lowercase();
+    lowercase.contains("login")
+        || lowercase.contains("sign in")
+        || lowercase.contains("authenticate")
+        || lowercase.contains("credential")
+        || lowercase.contains("api key")
+        || lowercase.contains("oauth")
+}
+
+fn parse_json_response(stdout: &str) -> Result<String, String> {
+    let trimmed = stdout.trim();
+    let parsed = match serde_json::from_str::<GeminiCliEnvelope>(trimmed) {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            let json_slice = extract_json_object_slice(trimmed)?;
+            serde_json::from_str::<GeminiCliEnvelope>(json_slice)
+                .map_err(|e| format!("Gemini CLI JSON ciktisi okunamadi: {e}"))?
+        }
+    };
+
+    if let Some(error) = parsed.error {
+        return Err(format!("Gemini CLI hata alani: {error}"));
+    }
+
+    parsed
+        .response
+        .map(|response| response.trim().to_string())
+        .filter(|response| !response.is_empty())
+        .ok_or_else(|| "Gemini CLI yanitinda `response` alani bos.".to_string())
+}
+
+fn run_global_headless_smoke_test() -> Result<(), String> {
+    let working_dir = gemini_working_dir()?;
+    let mut command = if cfg!(target_os = "windows") {
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/C").arg("gemini.cmd");
+        cmd
+    } else {
+        Command::new("gemini")
+    };
+
+    command
+        .current_dir(&working_dir)
+        .args([
+            "--prompt",
+            "Reply with OK only.",
+            "--approval-mode",
+            "plan",
+            "--output-format",
+            "json",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    apply_windows_path(&mut command);
+
+    let output = command
+        .output()
+        .map_err(|e| format!("Gemini CLI smoke test baslatilamadi: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !output.status.success() {
+        return Err(if stderr.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            stderr.trim().to_string()
+        });
+    }
+
+    let response = parse_json_response(&stdout)?;
+    if response.trim() == "OK" {
+        Ok(())
+    } else {
+        Err(format!("Beklenmeyen smoke test yaniti: {response}"))
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn spawn_windows_cmd_k(title: &str, cmd_k_body: &str) -> Result<(), String> {
     Command::new("cmd")
         .args(["/C", "start", title, "cmd", "/K", cmd_k_body])
         .spawn()
-        .map_err(|e| format!("CMD başlatılamadı: {e}"))?;
+        .map_err(|e| format!("CMD baslatilamadi: {e}"))?;
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
 fn spawn_dev_gemini_instructions_cmd() -> Result<(), String> {
-    let body = "echo Gemini CLI - kurulum talimatlari & echo. & echo npm install -g @google/gemini-cli@latest & echo gemini auth login & echo. & echo Gelistirme modu: otomatik kurulum yapilmadi. & pause";
+    let body = "echo Gemini CLI kurulumu: & echo npm install -g @google/gemini-cli@latest & echo gemini & echo. & echo Ilk acilista giris akisini tamamlayin. & pause";
     spawn_windows_cmd_k("QuizLab Gemini", body)
 }
 
@@ -136,38 +297,42 @@ fn spawn_dev_gemini_instructions_cmd() -> Result<(), String> {
     Command::new("sh")
         .arg("-c")
         .arg(
-            "printf '%s\\n' \
-             'Gemini CLI kurulumu:' \
-             '  npm install -g @google/gemini-cli@latest' \
-             '  gemini auth login' \
-             '' \
-             'Geliştirme modu: otomatik kurulum yapılmadı.' \
-             '' 'Devam etmek için Enter...'; read -r _",
+            "printf '%s\\n' 'Gemini CLI kurulumu:' '  npm install -g @google/gemini-cli@latest' '  gemini' '' 'Ilk acilista giris akislarini tamamlayin.' '' 'Devam etmek icin Enter...'; read -r _",
         )
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| format!("Terminal başlatılamadı: {e}"))?;
+        .map_err(|e| format!("Terminal baslatilamadi: {e}"))?;
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn spawn_release_gemini_install_cmd() -> Result<(), String> {
-    let body = "npm install -g @google/gemini-cli@latest && call gemini auth login && pause";
-    spawn_windows_cmd_k("QuizLab Gemini", body)
+fn spawn_release_gemini_setup_cmd(installed: bool) -> Result<(), String> {
+    let body = if installed {
+        "gemini"
+    } else {
+        "npm install -g @google/gemini-cli@latest && gemini"
+    };
+    let body_with_pause = format!("{body} & pause");
+    spawn_windows_cmd_k("QuizLab Gemini", &body_with_pause)
 }
 
 #[cfg(not(target_os = "windows"))]
-fn spawn_release_gemini_install_cmd() -> Result<(), String> {
+fn spawn_release_gemini_setup_cmd(installed: bool) -> Result<(), String> {
+    let body = if installed {
+        "gemini"
+    } else {
+        "npm install -g @google/gemini-cli@latest && gemini"
+    };
     Command::new("sh")
         .arg("-c")
-        .arg("npm install -g @google/gemini-cli@latest && gemini auth login")
+        .arg(body)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| format!("Kurulum başlatılamadı: {e}"))?;
+        .map_err(|e| format!("Kurulum baslatilamadi: {e}"))?;
     Ok(())
 }
 
@@ -177,166 +342,142 @@ fn run_gemini_cli_setup_action() -> Result<(), String> {
     }
 
     let (installed, _) = check_global_gemini_version();
-    if installed {
-        return Ok(());
+    spawn_release_gemini_setup_cmd(installed)
+}
+
+async fn spawn_gemini_process(
+    model: &str,
+    prompt: &str,
+    output_format: &str,
+    working_dir: &Path,
+) -> Result<tokio::process::Child, std::io::Error> {
+    let mut args = vec![
+        "--prompt".to_string(),
+        prompt.to_string(),
+        "--approval-mode".to_string(),
+        "plan".to_string(),
+        "--output-format".to_string(),
+        output_format.to_string(),
+    ];
+    if !model.trim().is_empty() {
+        args.push("--model".to_string());
+        args.push(model.trim().to_string());
     }
 
-    spawn_release_gemini_install_cmd()
-}
-
-/// Gemini CLI: stdin = bağlam; `-p` modele ek kullanıcı mesajı olarak eklenir.
-const HEADLESS_USER_PROMPT: &str = "Bağlamın tamamını oku; özellikle [CLI_SON_TALİMAT] bölümündeki kurallara uy ve istenen çıktıyı üret.";
-
-/// Frontend'den gelen `model` yalnızca bu isimlerden biri olabilir (komut enjeksiyonu ve geçersiz `-m` önlemi).
-const ALLOWED_GEMINI_MODELS: &[&str] = &[
-    "gemini-3.1-pro-preview",
-    "gemini-2.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-3.1-flash-lite-preview",
-];
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GeminiCliRequest {
-    model: String,
-    stdin_content: String,
-    prompt_flag: String,
-}
-
-/// Önce `gemini` (global npm), olmazsa `npx -y @google/gemini-cli` — Tauri GUI'de PATH bazen eksik kalır.
-async fn spawn_gemini_process(model: &str) -> Result<tokio::process::Child, std::io::Error> {
-    let args = [
-        "-m",
-        model,
-        "--output-format",
-        "json",
-        "-p",
-        HEADLESS_USER_PROMPT,
-    ];
-
-    let attempts: &[(&str, &[&str])] = if cfg!(target_os = "windows") {
-        &[
-            ("gemini", &[]),
-            ("gemini.cmd", &[]),
-            ("npx.cmd", &["-y", "@google/gemini-cli"]),
-            ("npx", &["-y", "@google/gemini-cli"]),
-        ]
+    let mut attempts: Vec<(String, Vec<String>)> = if cfg!(target_os = "windows") {
+        let mut candidates = vec![("gemini".to_string(), vec![]), ("gemini.cmd".to_string(), vec![])];
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            candidates.push((format!("{appdata}\\npm\\gemini.cmd"), vec![]));
+        }
+        candidates
     } else {
-        &[("gemini", &[]), ("npx", &["-y", "@google/gemini-cli"])]
+        vec![("gemini".to_string(), vec![])]
     };
 
-    let mut last_err: Option<std::io::Error> = None;
+    let mut last_error: Option<std::io::Error> = None;
 
-    for (program, prefix) in attempts {
-        let mut cmd = TokioCommand::new(program);
-        for p in *prefix {
-            cmd.arg(p);
+    for (program, prefix) in attempts.drain(..) {
+        let mut command = if cfg!(target_os = "windows") && program.ends_with(".cmd") {
+            let mut cmd = TokioCommand::new("cmd");
+            cmd.arg("/C").arg(&program);
+            for value in &prefix {
+                cmd.arg(value);
+            }
+            cmd
+        } else {
+            let mut cmd = TokioCommand::new(&program);
+            for value in &prefix {
+                cmd.arg(value);
+            }
+            cmd
+        };
+
+        if cfg!(target_os = "windows") {
+            apply_windows_path_tokio(&mut command);
         }
-        cmd.args(args);
-        cmd.stdin(Stdio::piped());
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
 
-        match cmd.spawn() {
+        command
+            .current_dir(working_dir)
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        match command.spawn() {
             Ok(child) => return Ok(child),
-            Err(e) => last_err = Some(e),
+            Err(error) => last_error = Some(error),
         }
     }
 
-    Err(last_err.unwrap_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "gemini veya npx bulunamadı",
-        )
+    Err(last_error.unwrap_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "gemini komutu bulunamadi")
     }))
 }
 
-const GEMINI_CLI_TIMEOUT: Duration = Duration::from_secs(300);
-
-/// CLI / npx uyarıları nedeniyle stdout'ta JSON'dan önce veya sonra metin olabilir.
-/// İlk `{` ile son `}` arasındaki alt diziyi döndürür; biri yoksa veya sıra geçersizse hata.
-fn extract_json_object_slice(s: &str) -> Result<&str, String> {
-    let start = s.find('{').ok_or_else(|| {
-        "Gemini CLI çıktısında JSON nesnesi başlangıcı ('{') bulunamadı.".to_string()
-    })?;
-    let end = s.rfind('}').ok_or_else(|| {
-        "Gemini CLI çıktısında JSON nesnesi sonu ('}') bulunamadı.".to_string()
-    })?;
-    if end < start {
-        return Err("Gemini CLI çıktısında '{' ve '}' sırası geçersiz.".to_string());
-    }
-    Ok(&s[start..=end])
-}
-
-/// `tokio::process::Child::wait_with_output` ile aynı mantık (`try_join3(wait, stdout, stderr)`), `&mut Child` ile
-/// böylece zaman aşımında `child.kill().await` kullanılabilir.
 async fn child_wait_with_output_like(
     child: &mut tokio::process::Child,
 ) -> std::io::Result<std::process::Output> {
     async fn read_pipe_to_end<A: AsyncReadExt + Unpin>(
         pipe: &mut Option<A>,
     ) -> std::io::Result<Vec<u8>> {
-        let mut buf = Vec::new();
+        let mut buffer = Vec::new();
         if let Some(io) = pipe.as_mut() {
-            io.read_to_end(&mut buf).await?;
+            io.read_to_end(&mut buffer).await?;
         }
-        Ok(buf)
+        Ok(buffer)
     }
 
     let mut stdout_pipe = child.stdout.take();
     let mut stderr_pipe = child.stderr.take();
 
-    let stdout_fut = read_pipe_to_end(&mut stdout_pipe);
-    let stderr_fut = read_pipe_to_end(&mut stderr_pipe);
+    let stdout_future = read_pipe_to_end(&mut stdout_pipe);
+    let stderr_future = read_pipe_to_end(&mut stderr_pipe);
+    let (status, stdout, stderr) = tokio::try_join!(child.wait(), stdout_future, stderr_future)?;
 
-    let (status, stdout, stderr) =
-        tokio::try_join!(child.wait(), stdout_fut, stderr_fut)?;
-
-    drop(stdout_pipe);
-    drop(stderr_pipe);
-
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
-    })
+    Ok(std::process::Output { status, stdout, stderr })
 }
 
-async fn run_gemini_cli(state: &GeminiRunState, req: GeminiCliRequest) -> Result<String, String> {
-    let model = req.model.trim();
+async fn run_gemini_cli(state: &GeminiRunState, request: GeminiCliRequest) -> Result<String, String> {
+    let timeout_secs = request.timeout_secs.unwrap_or(300);
+    let model = request.model.trim();
     if model.is_empty() {
-        return Err("Model adı boş.".to_string());
+        return Err("Model adi bos.".to_string());
     }
     if !ALLOWED_GEMINI_MODELS.contains(&model) {
-        return Err("Geçersiz model adı".to_string());
+        return Err("Gecersiz model adi.".to_string());
     }
 
-    let body = req.stdin_content.trim();
-    let tail = req.prompt_flag.trim();
-    if body.is_empty() {
-        return Err("Prompt gövdesi (stdin) boş; metin CLI'ye yazılmadı.".to_string());
-    }
-    if tail.is_empty() {
-        return Err("Son talimat (promptFlag) boş.".to_string());
+    let prompt = request.prompt.trim();
+    let stdin_content = request.stdin_content.unwrap_or_default();
+    if prompt.is_empty() && stdin_content.trim().is_empty() {
+        return Err("Prompt ve stdin icerigi bos.".to_string());
     }
 
-    let combined = format!("{body}\n\n---\n[CLI_SON_TALİMAT]\n{tail}\n");
+    let response_mode = match request.response_mode.trim() {
+        "json" => "json",
+        "text" => "text",
+        _ => return Err("Gecersiz response mode.".to_string()),
+    };
 
-    let mut child = spawn_gemini_process(model).await.map_err(|e| {
-        format!(
-            "Gemini CLI başlatılamadı. Kurulum: npm i -g @google/gemini-cli (veya PATH'te npx). Hata: {e}"
-        )
-    })?;
+    let working_dir = gemini_working_dir()?;
+    let mut child = spawn_gemini_process(model, prompt, response_mode, &working_dir)
+        .await
+        .map_err(|e| {
+            format!("Gemini CLI baslatilamadi. Kurulum: npm i -g @google/gemini-cli. Hata: {e}")
+        })?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(combined.as_bytes())
-            .await
-            .map_err(|e| format!("stdin yazılamadı: {e}"))?;
+        let trimmed_stdin = stdin_content.trim();
+        if !trimmed_stdin.is_empty() {
+            stdin
+                .write_all(trimmed_stdin.as_bytes())
+                .await
+                .map_err(|e| format!("stdin yazilamadi: {e}"))?;
+        }
         stdin
             .shutdown()
             .await
-            .map_err(|e| format!("stdin kapatılamadı: {e}"))?;
+            .map_err(|e| format!("stdin kapatilamadi: {e}"))?;
     }
 
     if let Some(pid) = child.id() {
@@ -344,65 +485,80 @@ async fn run_gemini_cli(state: &GeminiRunState, req: GeminiCliRequest) -> Result
     }
 
     let output = match tokio::time::timeout(
-        GEMINI_CLI_TIMEOUT,
+        Duration::from_secs(timeout_secs),
         child_wait_with_output_like(&mut child),
     )
     .await
     {
         Ok(Ok(output)) => output,
-        Ok(Err(e)) => return Err(format!("Gemini CLI bekleme hatası: {e}")),
-        Err(_elapsed) => {
-            if let Err(e) = child.kill().await {
+        Ok(Err(error)) => return Err(format!("Gemini CLI bekleme hatasi: {error}")),
+        Err(_) => {
+            if let Err(error) = child.kill().await {
                 return Err(format!(
-                    "Gemini CLI 300 saniye zaman aşımı; süreç sonlandırılamadı: {e}"
+                    "Gemini CLI {timeout_secs} saniye zaman asimina ugradi ve sonlandirilamadi: {error}"
                 ));
             }
-            return Err(
-                "Gemini CLI 300 saniye içinde tamamlanmadı; süreç zorla sonlandırıldı.".to_string(),
-            );
+            return Err(format!(
+                "Gemini CLI {timeout_secs} saniye icinde tamamlanmadi; surec zorla sonlandirildi."
+            ));
         }
     };
 
     if state.cancelled.load(Ordering::SeqCst) {
-        return Err("Gemini CLI çalışması kullanıcı tarafından iptal edildi.".to_string());
+        return Err("Gemini CLI calismasi kullanici tarafindan iptal edildi.".to_string());
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
     if !output.status.success() {
-        return Err(format!(
-            "Gemini CLI çıkış kodu {:?}. stderr: {}",
-            output.status.code(),
-            if stderr.is_empty() {
-                stdout.clone()
-            } else {
-                stderr
-            }
-        ));
+        let message = if stderr.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            stderr.trim().to_string()
+        };
+        return Err(message);
     }
 
-    #[derive(Deserialize)]
-    struct CliJson {
-        response: Option<String>,
-        error: Option<serde_json::Value>,
+    if response_mode == "json" {
+        return parse_json_response(&stdout);
     }
 
-    let json_block = extract_json_object_slice(stdout.trim())?;
-    let parsed: CliJson = serde_json::from_str(json_block).map_err(|e| {
-        format!(
-            "Gemini CLI çıktısı JSON değil: {e}. stdout (ilk 500 karakter): {}",
-            stdout.chars().take(500).collect::<String>()
-        )
-    })?;
+    let text_output = stdout.trim().to_string();
+    if text_output.is_empty() {
+        return Err("Gemini CLI metin yaniti bos dondu.".to_string());
+    }
+    Ok(text_output)
+}
 
-    if let Some(err) = parsed.error {
-        return Err(format!("Gemini CLI hata alanı: {err}"));
+#[tauri::command]
+fn read_pdf_file_base64(path: String) -> Result<ReadPdfFileResponse, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("PDF yolu bos.".to_string());
     }
 
-    parsed
-        .response
-        .ok_or_else(|| "Gemini CLI yanıtı boş (response yok).".to_string())
+    let file_path = Path::new(trimmed);
+    let extension = file_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if extension != "pdf" {
+        return Err("Sadece .pdf dosyalari desteklenir.".to_string());
+    }
+
+    let bytes = std::fs::read(file_path).map_err(|e| format!("PDF okunamadi: {e}"))?;
+    let file_name = file_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("document.pdf")
+        .to_string();
+
+    Ok(ReadPdfFileResponse {
+        base64: STANDARD.encode(bytes),
+        file_name,
+    })
 }
 
 #[tauri::command]
@@ -421,7 +577,7 @@ async fn abort_gemini_run(state: tauri::State<'_, GeminiRunState>) -> Result<(),
     let pid = state.active_pid.lock().await.take();
     if let Some(pid) = pid {
         state.cancelled.store(true, Ordering::SeqCst);
-        kill_pid(pid).map_err(|e| format!("Gemini süreci sonlandırılamadı: {e}"))?;
+        kill_pid(pid).map_err(|e| format!("Gemini sureci sonlandirilamadi: {e}"))?;
     }
     Ok(())
 }
@@ -430,30 +586,52 @@ async fn abort_gemini_run(state: tauri::State<'_, GeminiRunState>) -> Result<(),
 async fn gemini_cli_status() -> Result<GeminiCliStatus, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let (installed, version) = check_global_gemini_version();
-        GeminiCliStatus {
-            installed,
-            version,
-            is_dev_build: cfg!(debug_assertions),
+        if !installed {
+            return GeminiCliStatus {
+                installed,
+                version,
+                is_dev_build: cfg!(debug_assertions),
+                is_authenticated: false,
+                is_headless_ready: false,
+                status_message: Some("Gemini CLI bulunamadi.".to_string()),
+            };
+        }
+
+        match run_global_headless_smoke_test() {
+            Ok(()) => GeminiCliStatus {
+                installed: true,
+                version,
+                is_dev_build: cfg!(debug_assertions),
+                is_authenticated: true,
+                is_headless_ready: true,
+                status_message: Some("Headless kontrol basarili.".to_string()),
+            },
+            Err(message) => GeminiCliStatus {
+                installed: true,
+                version,
+                is_dev_build: cfg!(debug_assertions),
+                is_authenticated: !looks_like_auth_error(&message),
+                is_headless_ready: false,
+                status_message: Some(message),
+            },
         }
     })
     .await
-    .map_err(|e| format!("Durum okunamadı: {e}"))
+    .map_err(|e| format!("Durum okunamadi: {e}"))
 }
 
 #[tauri::command]
 async fn gemini_cli_setup_action() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(run_gemini_cli_setup_action)
         .await
-        .map_err(|e| format!("Kurulum işlemi sonlandı: {e}"))?
+        .map_err(|e| format!("Kurulum islemi sonlandi: {e}"))?
 }
 
-/// WebView içinde `jsPDF.save()` indirmeyi tetiklemediği için yerel kaydet penceresi.
-/// `Some(yol)` = kullanıcı kaydetti; `None` = iptal.
 #[tauri::command]
 fn save_quiz_pdf(default_name: String, pdf_base64: String) -> Result<Option<String>, String> {
     let bytes = STANDARD
         .decode(pdf_base64.trim())
-        .map_err(|e| format!("Geçersiz PDF verisi: {e}"))?;
+        .map_err(|e| format!("Gecersiz PDF verisi: {e}"))?;
     let mut name = default_name.trim().to_string();
     if name.is_empty() {
         name = "quiz_sonuc.pdf".to_string();
@@ -465,9 +643,9 @@ fn save_quiz_pdf(default_name: String, pdf_base64: String) -> Result<Option<Stri
         .add_filter("PDF", &["pdf"])
         .save_file();
     match path {
-        Some(p) => {
-            std::fs::write(&p, bytes).map_err(|e| e.to_string())?;
-            Ok(Some(p.to_string_lossy().into_owned()))
+        Some(path) => {
+            std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+            Ok(Some(path.to_string_lossy().into_owned()))
         }
         None => Ok(None),
     }
@@ -477,11 +655,20 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(GeminiRunState::default())
+        .manage(PdfRuntimeState::default())
         .invoke_handler(tauri::generate_handler![
             gemini_run,
             abort_gemini_run,
             gemini_cli_status,
             gemini_cli_setup_action,
+            read_pdf_file_base64,
+            read_pdf_file_info,
+            pdf_runtime_status,
+            pdf_bootstrap_runtime,
+            pdf_hybrid_start,
+            pdf_hybrid_stop,
+            extract_pdf_document,
+            extract_pdf_document_payload,
             save_quiz_pdf
         ])
         .run(tauri::generate_context!())

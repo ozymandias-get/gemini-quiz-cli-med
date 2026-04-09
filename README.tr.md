@@ -71,20 +71,35 @@ flowchart LR
 ```
 
 - **Ön uç:** React 19 + Vite 6 + Tailwind 4; durum için **Zustand**; animasyon için **Framer Motion**.
-- **Köprü:** `services/gemini/cli.ts` içindeki `runGeminiCli`, Rust tarafında `gemini_run` komutunu `invoke` eder (model, stdin, prompt parçası).
+- **Köprü:** `src/services/gemini/cli.ts` içindeki `runGeminiCli`, Rust tarafında `gemini_run` komutunu `invoke` eder (model, stdin, prompt parçası).
 - **Rust:** `gemini` veya `npx` sürecini yönetir; uzun işlemler için **iptal** desteği (`abort_gemini_run`).
+
+### PDF komut formatı
+
+Tam PDF analiz modunda CLI çağrısı şu şablona standartlanır:
+
+```bash
+gemini "[KISA_STDIN_IPUCU]" --file "[PDF_YOLU]" --non-interactive --model "[AYARLARDAN_SECILEN_MODEL]"
+```
+
+- İlk positional argüman artık kısa ve sabit bir ipucudur.
+- Tam analiz bağlamı (kural ve talimatlar) komut satırı limiti aşılmasın diye stdin üzerinden gönderilir.
+- PDF yolu `--file` ile verilir.
+- Kullanıcı onayı gerekmemesi için `--non-interactive` her zaman eklenir.
+- Model sabit değildir; kullanıcının sınav ayarından alınır.
 
 ## Proje yapısı
 
 | Yol | Görev |
 |-----|--------|
-| `App.tsx`, `index.tsx` | Uygulama kabuğu, yönlendirme, hata sınırı |
-| `views/` | Ekranlar: landing, yapılandırma, üretim, sınav, kartlar, sonuçlar |
-| `components/` | Formlar, sınav arayüzü, modallar, quiz-config blokları |
-| `services/` | PDF (`pdfService`, `pdfjsWorker`), akışlar (`appFlows`), Gemini (`gemini/`, `geminiService`) |
-| `store/` | Genel durum: üretim, sınav oturumu, ayarlar, CLI durumu, yönlendirme |
-| `constants/` | Çeviriler, PDF limitleri, demo veriler |
-| `utils/` | Metin yardımcıları, AI çıktısı ayrıştırma, toast |
+| `src/App.tsx`, `src/index.tsx` | Uygulama kabuğu, yönlendirme, hata sınırı |
+| `src/views/` | Ekranlar: landing, yapılandırma, üretim, sınav, kartlar, sonuçlar |
+| `src/components/` | Formlar, sınav arayüzü, modallar, quiz-config blokları |
+| `src/services/` | PDF (`pdfService`, `pdfjsWorker`), akışlar (`appFlows`), Gemini (`gemini/`) |
+| `src/store/` | Genel durum: üretim, sınav oturumu, ayarlar, CLI durumu, yönlendirme |
+| `src/constants/` | Çeviriler, PDF limitleri, demo veriler |
+| `src/utils/` | Metin yardımcıları, AI çıktısı ayrıştırma, toast |
+| `src/types/` | Uygulama genel tipleri (`index.ts`) |
 | `src-tauri/` | Tauri 2 Rust projesi, simgeler, `tauri.conf.json` |
 
 ## Teknoloji
@@ -106,7 +121,7 @@ flowchart LR
   gemini --version
   ```
 
-  Uygulama önce `gemini` / `gemini.cmd` yolunu dener; yoksa **`npx -y @google/gemini-cli`** kullanır. **Node** ve **`npx` PATH’te** olmalıdır; masaüstü kısayolu global npm önekini görmeyebilir. Google hesabı veya API anahtarı ile **CLI** tarafında oturum: [Gemini CLI](https://github.com/google-gemini/gemini-cli).
+  Masaüstü uygulaması PATH üzerinde gerçek bir `gemini` / `gemini.cmd` kurulumu bekler ve komutu headless modda `--prompt` ile `--output-format` kullanarak çalıştırır. Bu makinede bir kez interaktif `gemini` oturum açma akışını tamamlayın, sonra uygulamaya dönün.
 
 - **İsteğe bağlı:** `cargo install tauri-cli` ile `cargo tauri`; aksi halde **`npx @tauri-apps/cli`** npm betikleriyle kullanılır.
 
@@ -168,8 +183,8 @@ npm run tauri:build
 
 | Belirt | Ne yapmalı |
 |--------|------------|
-| “CLI yok” / üretim başlamıyor | Shell’de `gemini --version`; CLI’yi yeniden kurun; `npx -y @google/gemini-cli --version` deneyin. |
-| Terminalde çalışıyor, kısayoldan değil | GUI süreçleri farklı PATH kullanır; Node’u sistem PATH’ine ekleyin veya `npx` yedeğine güvenin. |
+| “CLI yok” / üretim başlamıyor | Shell’de `gemini --version` çalıştırın; CLI’yi yeniden kurun; global npm bin dizininin masaüstü süreçlerinden görüldüğünü doğrulayın. |
+| Terminalde çalışıyor, kısayoldan değil | GUI süreçleri farklı PATH kullanır; uygulamanın `gemini` komutunu bulabilmesi için global Node/npm bin dizinlerini sistem PATH’ine ekleyin. |
 | Tarayıcıda `invoke` / Tauri hatası | `npm run dev` kullanıyorsunuz — `npm run tauri:dev` kullanın. |
 | PDF reddedildi | **20 MB** ve **500 sayfa** sınırlarını kontrol edin; PDF’i bölün veya sıkıştırın. |
 | Yavaş veya zaman aşımı | Ayarlarda daha hızlı model; soru sayısını azaltın; odak kapsamını daraltın. |

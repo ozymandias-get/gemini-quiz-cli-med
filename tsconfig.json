@@ -20,11 +20,14 @@
     "jsx": "react-jsx",
     "paths": {
       "@/*": [
-        "./*"
+        "./src/*"
       ]
     },
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "noImplicitAny": true,
+    "noFallthroughCasesInSwitch": true
   },
+  "include": ["src"],
   "exclude": ["node_modules", "dist", "src-tauri"]
 }
