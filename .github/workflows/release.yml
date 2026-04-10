@@ -86,4 +86,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: QuizLab Med ${{ github.ref_name }}
+          generateReleaseNotes: true
+          includeUpdaterJson: false
           tauriScript: npx tauri
