@@ -19,6 +19,7 @@ import {
   selectQuizState,
   selectSettings,
 } from '../store';
+import { APP_SCROLL_ROOT_ID } from '../constants/domIds';
 
 export const ResultsView: FC = () => {
   const { t } = useTranslation();
@@ -32,7 +33,12 @@ export const ResultsView: FC = () => {
   const showScrollTop = useScrollTopVisibility(300);
 
   const scrollToTop = useCallback(() => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const el = document.getElementById(APP_SCROLL_ROOT_ID);
+    if (el) {
+      el.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   }, []);
 
   const totalQ = quizState.questions.length;

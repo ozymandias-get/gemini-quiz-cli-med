@@ -2,22 +2,36 @@
 import { type FC, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 
-export const glassCardClass = "bg-white/70 dark:bg-stone-900/60 backdrop-blur-xl border border-white/60 dark:border-stone-700/50 shadow-2xl dark:shadow-stone-950/50";
+export const glassCardClass =
+  "bg-gradient-to-br from-white/60 to-white/20 dark:from-stone-950/70 dark:to-stone-900/30 backdrop-blur-xl md:backdrop-blur-2xl backdrop-saturate-150 " +
+  "border border-white/50 border-b-white/20 border-r-white/20 dark:border-white/10 dark:border-b-white/5 dark:border-r-white/5 " +
+  "shadow-2xl shadow-stone-800/10 dark:shadow-black/50 ring-1 ring-white/40 dark:ring-white/5";
 
 /** Dış gradient çerçeve + derin gölge (Config: PDF / ayarlar panelleri) */
 export const configPanel3dWrapClass =
-  "rounded-[2rem] p-[1px] bg-gradient-to-br from-white/50 via-stone-100/40 to-stone-300/45 dark:from-white/12 dark:via-stone-700/35 dark:to-black/55 " +
-  "shadow-[0_18px_50px_-14px_rgba(15,23,42,0.28),0_6px_20px_-8px_rgba(0,0,0,0.12)] " +
-  "dark:shadow-[0_22px_56px_-12px_rgba(0,0,0,0.72),0_10px_28px_-10px_rgba(0,0,0,0.45)]";
+  "rounded-[2rem] p-[1px] bg-gradient-to-br from-white/80 via-white/40 to-white/10 dark:from-white/20 dark:via-white/5 dark:to-transparent " +
+  "shadow-[0_8px_32px_0_rgba(0,0,0,0.1)] dark:shadow-[0_8px_32px_0_rgba(0,0,0,0.5)]";
 
 /** İç yüz: cam + inset highlight (üst kenar ışığı) */
 export const configPanel3dInnerClass =
   "rounded-[calc(2rem-1px)] relative overflow-hidden flex flex-col min-h-0 " +
-  "bg-white/82 dark:bg-stone-900/72 backdrop-blur-xl " +
-  "border border-white/55 dark:border-stone-600/35 " +
-  "shadow-[inset_0_1px_0_rgba(255,255,255,0.55),inset_0_-1px_0_rgba(0,0,0,0.04)] " +
-  "dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.09),inset_0_-2px_12px_rgba(0,0,0,0.35)] " +
-  "ring-1 ring-black/[0.04] dark:ring-white/[0.07]";
+  "bg-gradient-to-br from-white/60 to-white/30 dark:from-stone-900/85 dark:to-stone-900/60 backdrop-blur-2xl backdrop-saturate-150 " +
+  "shadow-[inset_0_1px_1px_rgba(255,255,255,0.6)] dark:shadow-[inset_0_1px_1px_rgba(255,255,255,0.08)] " +
+  "ring-1 ring-black/[0.02] dark:ring-white/[0.05]";
+
+/** Config alt modüllerinde kart/accordion yüzeyi için ortak glass katman */
+export const configSectionGlassClass =
+  "rounded-3xl bg-gradient-to-br from-white/50 to-white/20 dark:from-stone-800/50 dark:to-stone-900/30 " +
+  "backdrop-blur-lg backdrop-saturate-150 shadow-xl shadow-stone-900/5 dark:shadow-black/40 " +
+  "border border-white/40 border-b-white/10 border-r-white/10 dark:border-stone-700/30 dark:border-b-transparent dark:border-r-transparent";
+
+/** Input/select/textarea yüzeyi için ortak glass katman */
+export const configInputGlassClass =
+  "bg-white/40 dark:bg-stone-800/40 text-stone-700 dark:text-stone-300 backdrop-blur-md backdrop-saturate-150 " +
+  "border border-white/30 dark:border-stone-700/40 " +
+  "shadow-[inset_0_2px_4px_rgba(0,0,0,0.05)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.2)] " +
+  "transition-all duration-300 hover:bg-white/60 dark:hover:bg-stone-800/60 hover:border-white/50 dark:hover:border-stone-600/50 " +
+  "focus-within:bg-white/80 dark:focus-within:bg-stone-800/70 focus-within:ring-2 focus-within:ring-sand-400/50 dark:focus-within:ring-sand-400/50 focus-within:border-transparent dark:focus-within:border-transparent";
 
 // Satır içi kalın metinleri işler (**text**)
 const parseInlineStyles = (text: string) => {
@@ -87,7 +101,7 @@ export const formatText = (text: string) => {
         if (trimmed.startsWith('### ') || trimmed.startsWith('## ')) {
           const content = trimmed.replace(/^#+\s*/, '');
           return (
-            <h4 key={i} className="font-bold text-indigo-600 dark:text-indigo-400 mt-2 mb-1 text-sm md:text-base border-b border-indigo-100 dark:border-indigo-900/30 pb-1">
+            <h4 key={i} className="font-bold text-sand-700 dark:text-sand-400 mt-2 mb-1 text-sm md:text-base border-b border-sand-200 dark:border-sand-800/40 pb-1">
               {parseInlineStyles(content)}
             </h4>
           );

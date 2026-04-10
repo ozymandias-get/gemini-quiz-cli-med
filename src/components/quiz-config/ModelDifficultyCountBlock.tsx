@@ -9,6 +9,7 @@ import {
   UNSELECTED_CHOICE_COUNT,
   ICON_ON_SELECTED,
 } from './configChoiceClasses';
+import { configInputGlassClass, configSectionGlassClass } from '../../utils/helpers';
 
 /** Model seçimi, zorluk sekmeleri ve soru adedi — ayar store ile bağlı. */
 export const ModelDifficultyCountBlock: FC<{
@@ -17,10 +18,10 @@ export const ModelDifficultyCountBlock: FC<{
   updateSetting: <K extends keyof QuizSettings>(key: K, value: QuizSettings[K]) => void;
 }> = ({ t, settings, updateSetting }) => (
   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 lg:gap-2">
-    <div className="flex flex-col bg-white/50 dark:bg-white/[0.03] backdrop-blur-md p-3 md:p-4 lg:p-3 rounded-2xl lg:rounded-3xl border border-white/60 dark:border-white/10 shadow-[0_8px_30px_rgb(0,0,0,0.04)] h-full transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)]">
+    <div className={`${configSectionGlassClass} flex flex-col p-3 md:p-4 lg:p-3 h-full transition-all duration-200 hover:shadow-[0_10px_24px_-18px_rgba(15,23,42,0.32)]`}>
       <div className="flex items-center gap-2 mb-2 lg:mb-2">
         <span className="w-1.5 h-4 bg-sand-400 rounded-full inline-block" />
-        <label className="text-[12px] font-extrabold text-stone-700 dark:text-stone-200 uppercase tracking-widest block">
+        <label className="text-[12px] font-extrabold text-stone-700 dark:text-stone-300 uppercase tracking-widest block">
           {t.modelLabel}
         </label>
       </div>
@@ -36,15 +37,15 @@ export const ModelDifficultyCountBlock: FC<{
             <motion.button
               key={m.type}
               type="button"
-              whileHover={{ y: -2, scale: 1.02 }}
-              whileTap={{ scale: 0.95 }}
+              whileHover={{ y: -1, scale: 1.01 }}
+              whileTap={{ scale: 0.98 }}
               onClick={() => updateSetting('model', m.type)}
               className={`relative min-h-[4rem] lg:min-h-[3.25rem] px-1.5 py-2 lg:py-2 rounded-xl lg:rounded-2xl flex flex-col items-center justify-center gap-1 lg:gap-1 transition-all duration-300 overflow-hidden ${
                 isSelected ? SELECTED_CHOICE : UNSELECTED_CHOICE_TILE
               }`}
             >
               <span
-                className={`relative z-10 transition-colors duration-300 ${isSelected ? `${ICON_ON_SELECTED} drop-shadow-md` : 'text-stone-400'}`}
+                className={`relative z-10 transition-colors duration-200 ${isSelected ? ICON_ON_SELECTED : 'text-stone-400'}`}
               >
                 {m.icon}
               </span>
@@ -60,14 +61,14 @@ export const ModelDifficultyCountBlock: FC<{
     </div>
 
     <div className="flex flex-col gap-3 md:gap-4 lg:gap-2 h-full min-h-0">
-      <div className="flex-1 flex flex-col justify-center bg-white/50 dark:bg-white/[0.03] backdrop-blur-md p-3 md:p-4 lg:p-3 rounded-2xl lg:rounded-3xl border border-white/60 dark:border-white/10 shadow-[0_8px_30px_rgb(0,0,0,0.04)] min-h-[7.5rem] lg:min-h-0 lg:shrink">
+      <div className={`${configSectionGlassClass} flex-1 flex flex-col justify-center p-3 md:p-4 lg:p-3 min-h-[7.5rem] lg:min-h-0 lg:shrink`}>
         <div className="flex items-center gap-2 mb-2 lg:mb-1.5">
           <span className="w-1.5 h-4 bg-sand-400 rounded-full inline-block" />
-          <label className="text-[12px] font-extrabold text-stone-700 dark:text-stone-200 uppercase tracking-widest block">
+          <label className="text-[12px] font-extrabold text-stone-700 dark:text-stone-300 uppercase tracking-widest block">
             {t.difficulty}
           </label>
         </div>
-        <div className="relative flex bg-stone-100/80 dark:bg-stone-950/40 p-1.5 rounded-2xl ring-1 ring-black/5 dark:ring-white/5 shadow-inner">
+        <div className={`relative flex p-1.5 rounded-2xl ${configInputGlassClass}`}>
           {Object.values(Difficulty).map((diff) => {
             const isActive = settings.difficulty === diff;
             return (
@@ -75,16 +76,16 @@ export const ModelDifficultyCountBlock: FC<{
                 key={diff}
                 type="button"
                 onClick={() => updateSetting('difficulty', diff)}
-                className={`relative flex-1 py-2.5 sm:py-3 text-[11px] sm:text-xs font-bold uppercase rounded-xl transition-all duration-300 z-10 ${
+                className={`relative flex-1 py-2.5 sm:py-3 text-[11px] sm:text-xs font-bold uppercase rounded-xl transition-all duration-200 z-10 ${
                   isActive
-                    ? 'text-stone-900'
+                    ? 'text-stone-900 dark:text-stone-100'
                     : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'
                 }`}
               >
                 {isActive && (
                   <motion.div
                     layoutId="diffTab"
-                    className="absolute inset-0 rounded-xl bg-gradient-to-br from-sand-100/90 to-sand-200/80 shadow-[0_2px_10px_rgba(212,197,169,0.25)] ring-1 ring-sand-400/50 dark:from-sand-300/60 dark:to-sand-400/55 dark:shadow-[0_2px_12px_rgba(212,197,169,0.35)] dark:ring-sand-400/55 z-[-1]"
+                    className="absolute inset-0 rounded-xl bg-sand-100/80 ring-1 ring-sand-300/45 dark:bg-sand-500/60 dark:ring-sand-400/40 z-[-1]"
                     transition={{ type: 'spring', stiffness: 350, damping: 25 }}
                   />
                 )}
@@ -95,12 +96,12 @@ export const ModelDifficultyCountBlock: FC<{
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col justify-center bg-white/50 dark:bg-white/[0.03] backdrop-blur-md p-3 md:p-4 lg:p-3 rounded-2xl lg:rounded-3xl border border-white/60 dark:border-white/10 shadow-[0_8px_30px_rgb(0,0,0,0.04)] min-h-[7.5rem] lg:min-h-0 lg:shrink relative overflow-hidden group">
-        <div className="absolute top-0 right-0 -m-4 w-24 h-24 bg-gradient-to-bl from-sand-200/40 to-transparent dark:from-stone-800/40 rounded-full blur-2xl transition-opacity group-hover:opacity-100 opacity-50" />
+      <div className={`${configSectionGlassClass} flex-1 flex flex-col justify-center p-3 md:p-4 lg:p-3 min-h-[7.5rem] lg:min-h-0 lg:shrink relative overflow-hidden group`}>
+        <div className="absolute top-0 right-0 -m-4 w-20 h-20 bg-gradient-to-bl from-sand-200/20 to-transparent dark:from-stone-800/20 rounded-full blur-xl transition-opacity group-hover:opacity-90 opacity-40" />
         <div className="flex justify-between items-center gap-3 mb-2 lg:mb-1.5 relative z-10">
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-4 bg-sand-400 rounded-full inline-block" />
-            <label className="text-[12px] font-extrabold text-stone-700 dark:text-stone-200 uppercase tracking-widest shrink-0">
+            <label className="text-[12px] font-extrabold text-stone-700 dark:text-stone-300 uppercase tracking-widest shrink-0">
               {t.qCount}
             </label>
           </div>
@@ -115,7 +116,7 @@ export const ModelDifficultyCountBlock: FC<{
                 updateSetting('questionCount', Math.max(1, Math.min(100, val)));
               }
             }}
-            className="w-16 text-center text-lg font-extrabold text-stone-900 dark:text-white bg-white/70 dark:bg-stone-800/60 rounded-xl border border-stone-200/80 dark:border-stone-700/60 py-1.5 px-2 outline-none focus:ring-2 focus:ring-sand-400 transition-all tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            className={`w-16 text-center text-lg font-extrabold text-stone-900 dark:text-white rounded-xl py-1.5 px-2 outline-none focus:ring-2 focus:ring-sand-400/60 transition-all tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${configInputGlassClass}`}
           />
         </div>
 
@@ -124,8 +125,8 @@ export const ModelDifficultyCountBlock: FC<{
             <motion.button
               key={count}
               type="button"
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.95 }}
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.98 }}
               onClick={() => updateSetting('questionCount', count)}
               className={`
                                             relative px-2 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 cursor-pointer

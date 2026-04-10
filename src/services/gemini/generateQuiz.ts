@@ -19,8 +19,11 @@ import {
   buildAvoidNearDuplicateStemsBlock,
 } from './quizPrompts';
 import { selectPreparedDocumentContext } from '../documentContext';
+import { delayWithAbort } from '../../utils/asyncScheduling';
+import { matchesCliUserCancellationMessage } from '../../utils/cancellation';
 
 const MAX_TOPUP_ATTEMPTS = 3;
+const DEMO_QUIZ_DELAY_MS = 10_000;
 
 function buildStructuredPrompt(promptBody: string): { prompt: string; stdinContent: string } {
   return {
@@ -44,29 +47,13 @@ export async function generateQuizQuestions(
     const pool = getDemoQuestionPool(language);
     const offset = previousQuestions.length;
     if (offset === 0) {
-      const signal = options?.signal;
-      await new Promise<void>((resolve, reject) => {
-        if (signal?.aborted) {
-          reject(new DOMException('Aborted', 'AbortError'));
-          return;
-        }
-        let timer: ReturnType<typeof setTimeout>;
-        const onAbort = () => {
-          clearTimeout(timer);
-          reject(new DOMException('Aborted', 'AbortError'));
-        };
-        signal?.addEventListener('abort', onAbort, { once: true });
-        timer = setTimeout(() => {
-          signal?.removeEventListener('abort', onAbort);
-          resolve();
-        }, 10000);
-      });
+      await delayWithAbort(DEMO_QUIZ_DELAY_MS, options?.signal);
     }
     return pool.slice(offset, Math.min(offset + settings.questionCount, pool.length));
   }
 
   if (!preparedDocument) {
-    throw new Error('PDF icerigi hazir degil. Lutfen dosyayi yeniden yukleyin.');
+    throw new Error('PDF içeriği hazır değil. Lütfen dosyayı yeniden yükleyin.');
   }
 
   const targetLanguage = LANGUAGE_NAMES[language];
@@ -157,14 +144,14 @@ export async function generateQuizQuestions(
       throw new Error(cancelledMessage);
     }
     const message = error instanceof Error ? error.message : '';
-    if (/cancelled|kullanici tarafindan|iptal edildi/i.test(message)) {
+    if (matchesCliUserCancellationMessage(message)) {
       throw new Error(cancelledMessage);
     }
 
-    let errorMessage = 'Soru olusturulamadi.';
+    let errorMessage = 'Soru oluşturulamadı.';
     if (error instanceof Error) {
       if (error.message.includes('503')) {
-        errorMessage = 'Servis yogun, tekrar deneyin.';
+        errorMessage = 'Servis yoğun, tekrar deneyin.';
       } else {
         errorMessage = `Hata: ${error.message}`;
       }

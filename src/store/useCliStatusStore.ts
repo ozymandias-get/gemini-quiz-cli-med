@@ -1,14 +1,9 @@
 import { create } from 'zustand';
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import { isTauri } from '@tauri-apps/api/core';
+import { fetchGeminiCliStatus } from '../services/api/geminiBackend';
+import type { GeminiCliStatusPayload } from '../services/api/types/geminiCli';
 
-export interface GeminiCliStatusPayload {
-  installed: boolean;
-  version?: string | null;
-  isDevBuild: boolean;
-  isAuthenticated: boolean;
-  isHeadlessReady: boolean;
-  statusMessage?: string | null;
-}
+export type { GeminiCliStatusPayload };
 
 export interface CliStatusSnapshot {
   isChecked: boolean;
@@ -69,7 +64,7 @@ export const useCliStatusStore = create<CliStatusStore>((set, get) => ({
 
     set({ cliCheckLoading: true });
     try {
-      const status = await invoke<GeminiCliStatusPayload>('gemini_cli_status');
+      const status = await fetchGeminiCliStatus();
       set({
         cliStatus: {
           isChecked: true,

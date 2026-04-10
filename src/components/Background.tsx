@@ -14,10 +14,10 @@ export const Background: FC = () => {
         <div className="absolute bottom-[10%] right-[10%] w-32 h-32 sm:w-56 sm:h-56 md:w-80 md:h-80 bg-stone-200 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-6000"></div>
       </div>
 
-      {/* Dark Mode Specific Blobs (Subtle Cool Tones) */}
+      {/* Dark mode: sıcak kum / amber — ayar paneli paletiyle uyumlu */}
       <div className="absolute top-0 left-0 w-full h-full opacity-0 dark:opacity-[0.38] transition-opacity duration-700">
-         <div className="absolute top-[20%] left-[10%] w-32 h-32 sm:w-64 sm:h-64 md:w-96 md:h-96 bg-indigo-900 rounded-full mix-blend-screen filter blur-[100px] animate-blob"></div>
-         <div className="absolute bottom-[20%] right-[10%] w-32 h-32 sm:w-64 sm:h-64 md:w-96 md:h-96 bg-stone-800 rounded-full mix-blend-screen filter blur-[100px] animate-blob animation-delay-4000"></div>
+         <div className="absolute top-[20%] left-[10%] w-32 h-32 sm:w-64 sm:h-64 md:w-96 md:h-96 bg-amber-950 rounded-full mix-blend-screen filter blur-[100px] animate-blob"></div>
+         <div className="absolute bottom-[20%] right-[10%] w-32 h-32 sm:w-64 sm:h-64 md:w-96 md:h-96 bg-sand-800 rounded-full mix-blend-screen filter blur-[100px] animate-blob animation-delay-4000"></div>
       </div>
       
       {/* Noise Texture Overlay for texture */}

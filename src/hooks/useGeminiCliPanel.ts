@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import { isTauri } from '@tauri-apps/api/core';
+import { geminiCliSetupAction } from '../services/api/geminiBackend';
 import { useCliStatusStore } from '../store/useCliStatusStore';
 
 export function useGeminiCliPanel() {
@@ -13,7 +14,7 @@ export function useGeminiCliPanel() {
     if (!inTauri) return;
     setCliSetupBusy(true);
     try {
-      await invoke('gemini_cli_setup_action');
+      await geminiCliSetupAction();
       if (!cliStatus.isDevBuild) {
         await checkCliStatus({ force: true });
       }

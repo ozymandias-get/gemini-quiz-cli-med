@@ -18,7 +18,7 @@ function tokenize(text: string | undefined): string[] {
   if (!text) return [];
   return text
     .toLowerCase()
-    .split(/[^a-z0-9]+/i)
+    .split(/[^\p{L}\p{N}]+/u)
     .map((term) => term.trim())
     .filter((term) => term.length >= 3);
 }

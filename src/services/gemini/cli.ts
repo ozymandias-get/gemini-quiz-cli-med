@@ -1,22 +1,23 @@
-import { invoke } from '@tauri-apps/api/core';
 import { ModelType } from '../../types';
+import { abortGeminiRunCommand, geminiRunCommand } from '../api/geminiBackend';
+import type { GeminiResponseMode } from '../api/types/geminiCli';
 
 function isGeminiCliMissingMessage(message: string): boolean {
   return (
-    message.includes('gemini komutu bulunamadi') ||
-    message.includes('Gemini CLI baslatilamadi')
+    message.includes('gemini komutu bulunamadı') ||
+    message.includes('Gemini CLI başlatılamadı')
   );
 }
 
-export type GeminiResponseMode = 'json' | 'text';
+export type { GeminiResponseMode };
 
 export type RunGeminiCliOptions = {
   signal?: AbortSignal;
   timeoutSecs?: number;
 };
 
-const TEXT_BASE_TIMEOUT_SECS = 90;
-const TEXT_MIN_TIMEOUT_SECS = 120;
+const TEXT_BASE_TIMEOUT_SECS = 120;
+const TEXT_MIN_TIMEOUT_SECS = 180;
 const TEXT_MAX_TIMEOUT_SECS = 600;
 const ALLOWED_MODELS = new Set<string>(Object.values(ModelType));
 
@@ -30,11 +31,7 @@ export function calculateGeminiTimeoutSecs(prompt: string, stdinContent = ''): n
 }
 
 export async function abortGeminiCliRun(): Promise<void> {
-  try {
-    await invoke('abort_gemini_run');
-  } catch {
-    /* ignore */
-  }
+  await abortGeminiRunCommand();
 }
 
 export async function runGeminiCli(
@@ -45,15 +42,15 @@ export async function runGeminiCli(
   options?: RunGeminiCliOptions
 ): Promise<string> {
   const selectedModel = model.trim();
-  if (!selectedModel) throw new Error('Model adi bos.');
+  if (!selectedModel) throw new Error('Model adı boş.');
   if (!ALLOWED_MODELS.has(selectedModel)) {
-    throw new Error(`Gecersiz model: ${selectedModel}`);
+    throw new Error(`Geçersiz model: ${selectedModel}`);
   }
 
   const trimmedPrompt = prompt.trim();
   const trimmedStdin = stdinContent.trim();
   if (!trimmedPrompt && !trimmedStdin) {
-    throw new Error("Icerik bos; Gemini CLI'ye prompt gonderilmedi.");
+    throw new Error("İçerik boş; Gemini CLI'ye prompt gönderilmedi.");
   }
 
   const signal = options?.signal;
@@ -69,25 +66,23 @@ export async function runGeminiCli(
   }
 
   try {
-    return await invoke<string>('gemini_run', {
-      req: {
-        model: selectedModel,
-        prompt: trimmedPrompt,
-        stdinContent: trimmedStdin || null,
-        responseMode,
-        timeoutSecs: options?.timeoutSecs ?? calculateGeminiTimeoutSecs(trimmedPrompt, trimmedStdin),
-      },
+    return await geminiRunCommand({
+      model: selectedModel,
+      prompt: trimmedPrompt,
+      stdinContent: trimmedStdin || null,
+      responseMode,
+      timeoutSecs: options?.timeoutSecs ?? calculateGeminiTimeoutSecs(trimmedPrompt, trimmedStdin),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (isGeminiCliMissingMessage(message)) {
-      throw new Error('Gemini CLI kurulu degil veya PATH icinde bulunamiyor.');
+      throw new Error('Gemini CLI kurulu değil veya PATH içinde bulunamıyor.');
     }
     if (/authenticate|login|sign in|api key|credentials/i.test(message)) {
-      throw new Error('Gemini CLI kimlik dogrulamasi hazir degil. Lutfen `gemini` komutuyla giris yapin.');
+      throw new Error('Gemini CLI kimlik doğrulaması hazır değil. Lütfen `gemini` komutuyla giriş yapın.');
     }
     if (/not allowed|invoke|tauri/i.test(message)) {
-      throw new Error("Bu ozellik yalnizca Tauri masaustu uygulamasinda calisir. `npm run tauri:dev` ile baslatin.");
+      throw new Error("Bu özellik yalnızca Tauri masaüstü uygulamasında çalışır. `npm run tauri:dev` ile başlatın.");
     }
     throw error instanceof Error ? error : new Error(message);
   } finally {

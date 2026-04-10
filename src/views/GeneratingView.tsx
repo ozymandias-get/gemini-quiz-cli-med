@@ -1,26 +1,72 @@
-import { useState, useEffect, createElement, type FC } from 'react';
+import { useState, useEffect, createElement, useMemo, useRef, type FC } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileSearch, BrainCircuit, PenTool, Sparkles, CheckCircle2, CircleSlash } from 'lucide-react';
+import {
+  FileSearch,
+  BrainCircuit,
+  PenTool,
+  Sparkles,
+  CheckCircle2,
+  CircleSlash,
+  ChevronDown,
+  Bug,
+  Trash2,
+} from 'lucide-react';
 import { glassCardClass } from '../utils/helpers';
 import { getModelDisplayName } from '../constants/translations';
 import { useTranslation } from '../hooks/useTranslations';
 import { useGenerationStore } from '../store/useGenerationStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 
+const stepKeys = ['step1', 'step2', 'step3', 'step4'] as const;
+
 const steps = [
-  { icon: FileSearch, key: 'step1', color: 'text-blue-500', bg: 'bg-blue-100 dark:bg-blue-900/30' },
-  { icon: BrainCircuit, key: 'step2', color: 'text-purple-500', bg: 'bg-purple-100 dark:bg-purple-900/30' },
-  { icon: PenTool, key: 'step3', color: 'text-orange-500', bg: 'bg-orange-100 dark:bg-orange-900/30' },
-  { icon: Sparkles, key: 'step4', color: 'text-sand-500', bg: 'bg-sand-100 dark:bg-sand-900/30' },
+  { icon: FileSearch, key: stepKeys[0], color: 'text-blue-500', bg: 'bg-blue-100 dark:bg-blue-900/30' },
+  { icon: BrainCircuit, key: stepKeys[1], color: 'text-purple-500', bg: 'bg-purple-100 dark:bg-purple-900/30' },
+  { icon: PenTool, key: stepKeys[2], color: 'text-orange-500', bg: 'bg-orange-100 dark:bg-orange-900/30' },
+  { icon: Sparkles, key: stepKeys[3], color: 'text-sand-500', bg: 'bg-sand-100 dark:bg-sand-900/30' },
 ];
 
 export const GeneratingView: FC = () => {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const message = useGenerationStore((s) => s.loadingMessage);
   const cancelGeneration = useGenerationStore((s) => s.cancelGeneration);
+  const generationLogs = useGenerationStore((s) => s.generationLogs);
+  const debugPanelOpen = useGenerationStore((s) => s.debugPanelOpen);
+  const autoScrollLogs = useGenerationStore((s) => s.autoScrollLogs);
+  const setDebugPanelOpen = useGenerationStore((s) => s.setDebugPanelOpen);
+  const setAutoScrollLogs = useGenerationStore((s) => s.setAutoScrollLogs);
+  const clearGenerationLogs = useGenerationStore((s) => s.clearGenerationLogs);
+  const ensureGenerationLogListener = useGenerationStore((s) => s.ensureGenerationLogListener);
   const model = useSettingsStore((s) => s.settings.model);
   const modelLabel = getModelDisplayName(model, t);
+  const generatingPresentation = useGenerationStore((s) => s.generatingPresentation);
   const [activeStep, setActiveStep] = useState(0);
+  const [statusNoteIndex, setStatusNoteIndex] = useState(0);
+  const logsContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const rotatingStatusNotes = useMemo(() => {
+    const p = generatingPresentation;
+    if (!p) return [];
+    if (p.mode === 'quiz') {
+      const base = t.generation.quizStatusNotes;
+      const extra = p.targetQuestionCount > 10 ? t.generation.quizBatchExtraNotes : [];
+      return [...base, ...extra];
+    }
+    if (p.mode === 'flashcards') return t.generation.flashcardStatusNotes;
+    return t.generation.remedialStatusNotes;
+  }, [generatingPresentation, t]);
+
+  useEffect(() => {
+    setStatusNoteIndex(0);
+  }, [rotatingStatusNotes]);
+
+  useEffect(() => {
+    if (rotatingStatusNotes.length <= 1) return;
+    const interval = setInterval(() => {
+      setStatusNoteIndex((prev) => (prev + 1) % rotatingStatusNotes.length);
+    }, 3200);
+    return () => clearInterval(interval);
+  }, [rotatingStatusNotes]);
 
   // Simulate progress through steps
   useEffect(() => {
@@ -30,6 +76,17 @@ export const GeneratingView: FC = () => {
 
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    void ensureGenerationLogListener();
+  }, [ensureGenerationLogListener]);
+
+  useEffect(() => {
+    if (!autoScrollLogs || !debugPanelOpen || !logsContainerRef.current) return;
+    logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
+  }, [generationLogs, autoScrollLogs, debugPanelOpen]);
+
+  const renderedLogs = useMemo(() => generationLogs.slice(-120), [generationLogs]);
 
   return (
     <div className="mx-auto flex h-full min-h-0 w-full min-w-0 max-w-2xl flex-1 flex-col justify-center overflow-y-auto overscroll-contain px-2 py-4 [scrollbar-gutter:stable] md:px-4 md:py-6">
@@ -70,10 +127,28 @@ export const GeneratingView: FC = () => {
                     exit={{ opacity: 0, y: -10 }}
                     className="text-xl font-serif font-bold leading-snug text-stone-800 sm:text-2xl dark:text-stone-100"
                 >
-                    {message || t.generation[steps[activeStep].key]}
+                    {message || t.generation[stepKeys[activeStep]]}
                 </motion.h3>
              </AnimatePresence>
-             <p className="mt-2 text-sm font-medium tracking-wide text-stone-500 dark:text-stone-400">
+             {rotatingStatusNotes.length > 0 && (
+               <AnimatePresence mode="wait">
+                 <motion.p
+                   key={statusNoteIndex}
+                   initial={{ opacity: 0, y: 6 }}
+                   animate={{ opacity: 1, y: 0 }}
+                   exit={{ opacity: 0, y: -6 }}
+                   transition={{ duration: 0.25 }}
+                   className="mt-2 min-h-[1.25rem] text-sm leading-snug text-stone-600 dark:text-stone-300"
+                 >
+                   {rotatingStatusNotes[statusNoteIndex]}
+                 </motion.p>
+               </AnimatePresence>
+             )}
+             <p
+               className={`text-sm font-medium tracking-wide text-stone-500 dark:text-stone-400 ${
+                 rotatingStatusNotes.length > 0 ? 'mt-1.5' : 'mt-2'
+               }`}
+             >
                  {modelLabel} · {t.generation.processing}
              </p>
         </div>
@@ -105,6 +180,88 @@ export const GeneratingView: FC = () => {
                      </div>
                  )
              })}
+        </div>
+
+        <div className="z-10 mt-6 w-full max-w-xl">
+          <button
+            type="button"
+            onClick={() => setDebugPanelOpen(!debugPanelOpen)}
+            className="flex w-full items-center justify-between rounded-2xl border border-stone-200/80 bg-white/80 px-4 py-3 text-left text-sm font-semibold text-stone-700 shadow-sm transition hover:bg-white dark:border-stone-700 dark:bg-stone-900/60 dark:text-stone-200 dark:hover:bg-stone-900"
+          >
+            <span className="inline-flex items-center gap-2">
+              <Bug size={16} className="text-amber-600 dark:text-amber-400" />
+              {language === 'tr' ? 'Tam o ekranda neler oluyor?' : "What's happening behind the scenes?"}
+            </span>
+            <span className="inline-flex items-center gap-2 text-xs font-medium text-stone-500 dark:text-stone-400">
+              {generationLogs.length} log
+              <ChevronDown size={16} className={`transition-transform ${debugPanelOpen ? 'rotate-180' : ''}`} />
+            </span>
+          </button>
+
+          <AnimatePresence initial={false}>
+            {debugPanelOpen && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: 'easeInOut' }}
+                className="overflow-hidden"
+              >
+                <div className="mt-2 rounded-2xl border border-stone-200/80 bg-stone-50/90 p-3 dark:border-stone-700 dark:bg-stone-900/70">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <label className="inline-flex items-center gap-2 text-xs text-stone-600 dark:text-stone-300">
+                      <input
+                        type="checkbox"
+                        checked={autoScrollLogs}
+                        onChange={(event) => setAutoScrollLogs(event.target.checked)}
+                        className="h-3.5 w-3.5 rounded border-stone-300 text-sand-600 focus:ring-sand-500"
+                      />
+                      Auto scroll
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => clearGenerationLogs()}
+                      className="inline-flex items-center gap-1 rounded-lg border border-stone-300 px-2 py-1 text-xs text-stone-600 transition hover:bg-stone-100 dark:border-stone-600 dark:text-stone-300 dark:hover:bg-stone-800"
+                    >
+                      <Trash2 size={12} />
+                      Clear
+                    </button>
+                  </div>
+
+                  <div
+                    ref={logsContainerRef}
+                    className="max-h-56 overflow-y-auto rounded-xl border border-stone-200 bg-white/90 p-2 text-xs dark:border-stone-700 dark:bg-stone-950/70"
+                  >
+                    {renderedLogs.length === 0 ? (
+                      <p className="px-2 py-3 text-center text-stone-500 dark:text-stone-400">
+                        Henüz teknik log yok.
+                      </p>
+                    ) : (
+                      renderedLogs.map((log, index) => (
+                        <div
+                          key={`${log.timestamp}-${index}`}
+                          className="mb-2 rounded-lg border border-stone-200/70 bg-stone-50 px-2 py-1.5 text-stone-700 last:mb-0 dark:border-stone-700 dark:bg-stone-900/80 dark:text-stone-200"
+                        >
+                          <div className="mb-1 flex items-center justify-between gap-2">
+                            <span className="font-semibold">{log.stage}</span>
+                            <span className="text-[10px] text-stone-500 dark:text-stone-400">
+                              {new Date(log.timestamp).toLocaleTimeString()}
+                            </span>
+                          </div>
+                          <p className="whitespace-pre-wrap break-words">{log.message}</p>
+                          {log.meta && (
+                            <pre className="mt-1 max-h-24 overflow-auto rounded bg-black/80 p-2 text-[10px] text-emerald-200">
+                              {JSON.stringify(log.meta, null, 2)}
+                            </pre>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* İptal: ilerleme listesinin altında, kart içinde ikincil eylem */}

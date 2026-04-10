@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command as TokioCommand;
 use tokio::sync::Mutex;
 
@@ -113,6 +113,48 @@ const ALLOWED_GEMINI_MODELS: &[&str] = &[
     "gemini-3-flash-preview",
     "gemini-3.1-flash-lite-preview",
 ];
+const GEMINI_DEFAULT_TIMEOUT_SECS: u64 = 300;
+const GEMINI_MIN_TIMEOUT_SECS: u64 = 15;
+const GEMINI_MAX_TIMEOUT_SECS: u64 = 900;
+const GEMINI_MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+const GEMINI_STDIN_PROMPT_PREFIX: &str = "Prompt:\n";
+const GEMINI_STDIN_CONTEXT_PREFIX: &str = "\n\nContext:\n";
+
+fn now_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
+fn truncate_for_log(value: &str, max_chars: usize) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for (idx, ch) in trimmed.chars().enumerate() {
+        if idx >= max_chars {
+            out.push_str("...");
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn log_gemini_event(stage: &str, level: &str, payload: serde_json::Value) {
+    eprintln!(
+        "{}",
+        serde_json::json!({
+            "source": "gemini.cli",
+            "stage": stage,
+            "level": level,
+            "timestamp": now_millis(),
+            "meta": payload,
+        })
+    );
+}
 
 fn build_augmented_windows_path() -> Option<String> {
     if !cfg!(target_os = "windows") {
@@ -151,7 +193,7 @@ fn apply_windows_path_tokio(command: &mut TokioCommand) {
 
 fn gemini_working_dir() -> Result<PathBuf, String> {
     let dir = std::env::temp_dir().join("quizlab-med-gemini-headless");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Gecici Gemini dizini olusturulamadi: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Geçici Gemini dizini oluşturulamadı: {e}"))?;
     Ok(dir)
 }
 
@@ -189,13 +231,53 @@ fn check_global_gemini_version() -> (bool, Option<String>) {
     (false, None)
 }
 
-fn extract_json_object_slice(content: &str) -> Result<&str, String> {
-    let start = content.find('{').ok_or_else(|| "Gemini CLI ciktisinda JSON baslangici bulunamadi.".to_string())?;
-    let end = content.rfind('}').ok_or_else(|| "Gemini CLI ciktisinda JSON sonu bulunamadi.".to_string())?;
-    if end < start {
-        return Err("Gemini CLI JSON sinirlari gecersiz.".to_string());
+fn extract_first_json_object_slice(content: &str) -> Result<&str, String> {
+    let mut start_index: Option<usize> = None;
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (idx, ch) in content.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            continue;
+        }
+
+        if ch == '{' {
+            if start_index.is_none() {
+                start_index = Some(idx);
+            }
+            depth += 1;
+        } else if ch == '}' {
+            if depth == 0 {
+                continue;
+            }
+            depth -= 1;
+            if depth == 0 {
+                if let Some(start) = start_index {
+                    return Ok(&content[start..=idx]);
+                }
+            }
+        }
     }
-    Ok(&content[start..=end])
+
+    if start_index.is_none() {
+        return Err("Gemini CLI çıktısında JSON başlangıcı bulunamadı.".to_string());
+    }
+    Err("Gemini CLI çıktısında JSON nesnesi tamamlanamadı.".to_string())
 }
 
 fn looks_like_auth_error(message: &str) -> bool {
@@ -213,9 +295,9 @@ fn parse_json_response(stdout: &str) -> Result<String, String> {
     let parsed = match serde_json::from_str::<GeminiCliEnvelope>(trimmed) {
         Ok(parsed) => parsed,
         Err(_) => {
-            let json_slice = extract_json_object_slice(trimmed)?;
+            let json_slice = extract_first_json_object_slice(trimmed)?;
             serde_json::from_str::<GeminiCliEnvelope>(json_slice)
-                .map_err(|e| format!("Gemini CLI JSON ciktisi okunamadi: {e}"))?
+                .map_err(|e| format!("Gemini CLI JSON çıktısı okunamadı: {e}"))?
         }
     };
 
@@ -256,7 +338,7 @@ fn run_global_headless_smoke_test() -> Result<(), String> {
 
     let output = command
         .output()
-        .map_err(|e| format!("Gemini CLI smoke test baslatilamadi: {e}"))?;
+        .map_err(|e| format!("Gemini CLI smoke test başlatılamadı: {e}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -273,7 +355,7 @@ fn run_global_headless_smoke_test() -> Result<(), String> {
     if response.trim() == "OK" {
         Ok(())
     } else {
-        Err(format!("Beklenmeyen smoke test yaniti: {response}"))
+        Err(format!("Beklenmeyen smoke test yanıtı: {response}"))
     }
 }
 
@@ -282,13 +364,13 @@ fn spawn_windows_cmd_k(title: &str, cmd_k_body: &str) -> Result<(), String> {
     Command::new("cmd")
         .args(["/C", "start", title, "cmd", "/K", cmd_k_body])
         .spawn()
-        .map_err(|e| format!("CMD baslatilamadi: {e}"))?;
+        .map_err(|e| format!("CMD başlatılamadı: {e}"))?;
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
 fn spawn_dev_gemini_instructions_cmd() -> Result<(), String> {
-    let body = "echo Gemini CLI kurulumu: & echo npm install -g @google/gemini-cli@latest & echo gemini & echo. & echo Ilk acilista giris akisini tamamlayin. & pause";
+    let body = "echo Gemini CLI kurulumu: & echo npm install -g @google/gemini-cli@latest & echo gemini & echo. & echo İlk açılışta giriş akışını tamamlayın. & pause";
     spawn_windows_cmd_k("QuizLab Gemini", body)
 }
 
@@ -297,13 +379,13 @@ fn spawn_dev_gemini_instructions_cmd() -> Result<(), String> {
     Command::new("sh")
         .arg("-c")
         .arg(
-            "printf '%s\\n' 'Gemini CLI kurulumu:' '  npm install -g @google/gemini-cli@latest' '  gemini' '' 'Ilk acilista giris akislarini tamamlayin.' '' 'Devam etmek icin Enter...'; read -r _",
+            "printf '%s\\n' 'Gemini CLI kurulumu:' '  npm install -g @google/gemini-cli@latest' '  gemini' '' 'İlk açılışta giriş akışlarını tamamlayın.' '' 'Devam etmek için Enter...'; read -r _",
         )
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| format!("Terminal baslatilamadi: {e}"))?;
+        .map_err(|e| format!("Terminal başlatılamadı: {e}"))?;
     Ok(())
 }
 
@@ -332,7 +414,7 @@ fn spawn_release_gemini_setup_cmd(installed: bool) -> Result<(), String> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| format!("Kurulum baslatilamadi: {e}"))?;
+        .map_err(|e| format!("Kurulum başlatılamadı: {e}"))?;
     Ok(())
 }
 
@@ -351,9 +433,14 @@ async fn spawn_gemini_process(
     output_format: &str,
     working_dir: &Path,
 ) -> Result<tokio::process::Child, std::io::Error> {
+    let safe_prompt = if prompt.trim().is_empty() {
+        "Follow stdin instructions."
+    } else {
+        prompt.trim()
+    };
     let mut args = vec![
         "--prompt".to_string(),
-        prompt.to_string(),
+        safe_prompt.to_string(),
         "--approval-mode".to_string(),
         "plan".to_string(),
         "--output-format".to_string(),
@@ -410,19 +497,36 @@ async fn spawn_gemini_process(
     }
 
     Err(last_error.unwrap_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "gemini komutu bulunamadi")
+        std::io::Error::new(std::io::ErrorKind::NotFound, "gemini komutu bulunamadı")
     }))
 }
 
 async fn child_wait_with_output_like(
     child: &mut tokio::process::Child,
 ) -> std::io::Result<std::process::Output> {
-    async fn read_pipe_to_end<A: AsyncReadExt + Unpin>(
+    async fn read_pipe_to_end_limited<A: AsyncRead + Unpin>(
         pipe: &mut Option<A>,
+        label: &str,
     ) -> std::io::Result<Vec<u8>> {
         let mut buffer = Vec::new();
         if let Some(io) = pipe.as_mut() {
-            io.read_to_end(&mut buffer).await?;
+            let mut chunk = [0u8; 8192];
+            loop {
+                let read = io.read(&mut chunk).await?;
+                if read == 0 {
+                    break;
+                }
+                if buffer.len().saturating_add(read) > GEMINI_MAX_OUTPUT_BYTES {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "Gemini CLI {label} çıktısı {} byte sınırını aştı.",
+                            GEMINI_MAX_OUTPUT_BYTES
+                        ),
+                    ));
+                }
+                buffer.extend_from_slice(&chunk[..read]);
+            }
         }
         Ok(buffer)
     }
@@ -430,15 +534,18 @@ async fn child_wait_with_output_like(
     let mut stdout_pipe = child.stdout.take();
     let mut stderr_pipe = child.stderr.take();
 
-    let stdout_future = read_pipe_to_end(&mut stdout_pipe);
-    let stderr_future = read_pipe_to_end(&mut stderr_pipe);
+    let stdout_future = read_pipe_to_end_limited(&mut stdout_pipe, "stdout");
+    let stderr_future = read_pipe_to_end_limited(&mut stderr_pipe, "stderr");
     let (status, stdout, stderr) = tokio::try_join!(child.wait(), stdout_future, stderr_future)?;
 
     Ok(std::process::Output { status, stdout, stderr })
 }
 
 async fn run_gemini_cli(state: &GeminiRunState, request: GeminiCliRequest) -> Result<String, String> {
-    let timeout_secs = request.timeout_secs.unwrap_or(300);
+    let timeout_secs = request
+        .timeout_secs
+        .unwrap_or(GEMINI_DEFAULT_TIMEOUT_SECS)
+        .clamp(GEMINI_MIN_TIMEOUT_SECS, GEMINI_MAX_TIMEOUT_SECS);
     let model = request.model.trim();
     if model.is_empty() {
         return Err("Model adi bos.".to_string());
@@ -459,25 +566,41 @@ async fn run_gemini_cli(state: &GeminiRunState, request: GeminiCliRequest) -> Re
         _ => return Err("Gecersiz response mode.".to_string()),
     };
 
+    let started_at = Instant::now();
     let working_dir = gemini_working_dir()?;
+    let stdin_payload = format!(
+        "{GEMINI_STDIN_PROMPT_PREFIX}{prompt}{GEMINI_STDIN_CONTEXT_PREFIX}{}",
+        stdin_content.trim()
+    );
+    log_gemini_event(
+        "run.start",
+        "info",
+        serde_json::json!({
+            "model": model,
+            "responseMode": response_mode,
+            "timeoutSecs": timeout_secs,
+            "promptPreview": truncate_for_log(prompt, 120),
+            "stdinChars": stdin_payload.chars().count(),
+        }),
+    );
     let mut child = spawn_gemini_process(model, prompt, response_mode, &working_dir)
         .await
         .map_err(|e| {
-            format!("Gemini CLI baslatilamadi. Kurulum: npm i -g @google/gemini-cli. Hata: {e}")
+            format!("Gemini CLI başlatılamadı. Kurulum: npm i -g @google/gemini-cli. Hata: {e}")
         })?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        let trimmed_stdin = stdin_content.trim();
+        let trimmed_stdin = stdin_payload.trim();
         if !trimmed_stdin.is_empty() {
             stdin
                 .write_all(trimmed_stdin.as_bytes())
                 .await
-                .map_err(|e| format!("stdin yazilamadi: {e}"))?;
+                .map_err(|e| format!("stdin yazılamadı: {e}"))?;
         }
         stdin
             .shutdown()
             .await
-            .map_err(|e| format!("stdin kapatilamadi: {e}"))?;
+            .map_err(|e| format!("stdin kapatılamadı: {e}"))?;
     }
 
     if let Some(pid) = child.id() {
@@ -491,21 +614,58 @@ async fn run_gemini_cli(state: &GeminiRunState, request: GeminiCliRequest) -> Re
     .await
     {
         Ok(Ok(output)) => output,
-        Ok(Err(error)) => return Err(format!("Gemini CLI bekleme hatasi: {error}")),
+        Ok(Err(error)) => {
+            log_gemini_event(
+                "run.failure",
+                "error",
+                serde_json::json!({
+                    "kind": "wait_error",
+                    "elapsedMs": started_at.elapsed().as_millis(),
+                    "message": error.to_string()
+                }),
+            );
+            return Err(format!("Gemini CLI bekleme hatasi: {error}"));
+        }
         Err(_) => {
             if let Err(error) = child.kill().await {
+                log_gemini_event(
+                    "run.failure",
+                    "error",
+                    serde_json::json!({
+                        "kind": "timeout_kill_error",
+                        "timeoutSecs": timeout_secs,
+                        "elapsedMs": started_at.elapsed().as_millis(),
+                        "message": error.to_string(),
+                    }),
+                );
                 return Err(format!(
-                    "Gemini CLI {timeout_secs} saniye zaman asimina ugradi ve sonlandirilamadi: {error}"
+                    "Gemini CLI {timeout_secs} saniye zaman aşımına uğradı ve sonlandırılamadı: {error}"
                 ));
             }
+            log_gemini_event(
+                "run.failure",
+                "error",
+                serde_json::json!({
+                    "kind": "timeout",
+                    "timeoutSecs": timeout_secs,
+                    "elapsedMs": started_at.elapsed().as_millis(),
+                }),
+            );
             return Err(format!(
-                "Gemini CLI {timeout_secs} saniye icinde tamamlanmadi; surec zorla sonlandirildi."
+                "Gemini CLI {timeout_secs} saniye içinde tamamlanmadı; süreç zorla sonlandırıldı."
             ));
         }
     };
 
     if state.cancelled.load(Ordering::SeqCst) {
-        return Err("Gemini CLI calismasi kullanici tarafindan iptal edildi.".to_string());
+        log_gemini_event(
+            "run.cancelled",
+            "info",
+            serde_json::json!({
+                "elapsedMs": started_at.elapsed().as_millis(),
+            }),
+        );
+        return Err("Gemini CLI çalışması kullanıcı tarafından iptal edildi.".to_string());
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -517,17 +677,62 @@ async fn run_gemini_cli(state: &GeminiRunState, request: GeminiCliRequest) -> Re
         } else {
             stderr.trim().to_string()
         };
+        log_gemini_event(
+            "run.failure",
+            "error",
+            serde_json::json!({
+                "kind": "exit_nonzero",
+                "elapsedMs": started_at.elapsed().as_millis(),
+                "exitCode": output.status.code(),
+                "stdoutPreview": truncate_for_log(&stdout, 240),
+                "stderrPreview": truncate_for_log(&stderr, 240),
+            }),
+        );
         return Err(message);
     }
 
     if response_mode == "json" {
-        return parse_json_response(&stdout);
+        let parsed = parse_json_response(&stdout);
+        if let Err(error) = &parsed {
+            log_gemini_event(
+                "run.failure",
+                "error",
+                serde_json::json!({
+                    "kind": "json_parse_error",
+                    "elapsedMs": started_at.elapsed().as_millis(),
+                    "stdoutPreview": truncate_for_log(&stdout, 240),
+                    "message": error,
+                }),
+            );
+        } else {
+            log_gemini_event(
+                "run.success",
+                "success",
+                serde_json::json!({
+                    "responseMode": "json",
+                    "elapsedMs": started_at.elapsed().as_millis(),
+                    "stdoutBytes": output.stdout.len(),
+                    "stderrBytes": output.stderr.len(),
+                }),
+            );
+        }
+        return parsed;
     }
 
     let text_output = stdout.trim().to_string();
     if text_output.is_empty() {
         return Err("Gemini CLI metin yaniti bos dondu.".to_string());
     }
+    log_gemini_event(
+        "run.success",
+        "success",
+        serde_json::json!({
+            "responseMode": "text",
+            "elapsedMs": started_at.elapsed().as_millis(),
+            "stdoutBytes": output.stdout.len(),
+            "stderrBytes": output.stderr.len(),
+        }),
+    );
     Ok(text_output)
 }
 
@@ -535,7 +740,7 @@ async fn run_gemini_cli(state: &GeminiRunState, request: GeminiCliRequest) -> Re
 fn read_pdf_file_base64(path: String) -> Result<ReadPdfFileResponse, String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
-        return Err("PDF yolu bos.".to_string());
+        return Err("PDF yolu boş.".to_string());
     }
 
     let file_path = Path::new(trimmed);
@@ -545,10 +750,10 @@ fn read_pdf_file_base64(path: String) -> Result<ReadPdfFileResponse, String> {
         .map(|value| value.to_ascii_lowercase())
         .unwrap_or_default();
     if extension != "pdf" {
-        return Err("Sadece .pdf dosyalari desteklenir.".to_string());
+        return Err("Sadece .pdf dosyaları desteklenir.".to_string());
     }
 
-    let bytes = std::fs::read(file_path).map_err(|e| format!("PDF okunamadi: {e}"))?;
+    let bytes = std::fs::read(file_path).map_err(|e| format!("PDF okunamadı: {e}"))?;
     let file_name = file_path
         .file_name()
         .and_then(|value| value.to_str())
@@ -577,7 +782,7 @@ async fn abort_gemini_run(state: tauri::State<'_, GeminiRunState>) -> Result<(),
     let pid = state.active_pid.lock().await.take();
     if let Some(pid) = pid {
         state.cancelled.store(true, Ordering::SeqCst);
-        kill_pid(pid).map_err(|e| format!("Gemini sureci sonlandirilamadi: {e}"))?;
+        kill_pid(pid).map_err(|e| format!("Gemini süreci sonlandırılamadı: {e}"))?;
     }
     Ok(())
 }
@@ -593,7 +798,7 @@ async fn gemini_cli_status() -> Result<GeminiCliStatus, String> {
                 is_dev_build: cfg!(debug_assertions),
                 is_authenticated: false,
                 is_headless_ready: false,
-                status_message: Some("Gemini CLI bulunamadi.".to_string()),
+                status_message: Some("Gemini CLI bulunamadı.".to_string()),
             };
         }
 
@@ -617,21 +822,21 @@ async fn gemini_cli_status() -> Result<GeminiCliStatus, String> {
         }
     })
     .await
-    .map_err(|e| format!("Durum okunamadi: {e}"))
+    .map_err(|e| format!("Durum okunamadı: {e}"))
 }
 
 #[tauri::command]
 async fn gemini_cli_setup_action() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(run_gemini_cli_setup_action)
         .await
-        .map_err(|e| format!("Kurulum islemi sonlandi: {e}"))?
+        .map_err(|e| format!("Kurulum işlemi sonlandı: {e}"))?
 }
 
 #[tauri::command]
 fn save_quiz_pdf(default_name: String, pdf_base64: String) -> Result<Option<String>, String> {
     let bytes = STANDARD
         .decode(pdf_base64.trim())
-        .map_err(|e| format!("Gecersiz PDF verisi: {e}"))?;
+        .map_err(|e| format!("Geçersiz PDF verisi: {e}"))?;
     let mut name = default_name.trim().to_string();
     if name.is_empty() {
         name = "quiz_sonuc.pdf".to_string();

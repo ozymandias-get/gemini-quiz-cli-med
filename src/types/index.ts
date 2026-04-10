@@ -126,6 +126,16 @@ export interface PdfRuntimeStatus {
   statusMessage: string | null;
 }
 
+export type GenerationLogLevel = 'info' | 'success' | 'warning' | 'error';
+
+export interface GenerationLogEntry {
+  stage: string;
+  message: string;
+  level: GenerationLogLevel;
+  timestamp: number;
+  meta?: Record<string, unknown>;
+}
+
 export interface PreparedDocumentChunk {
   id: string;
   pageStart: number;
@@ -161,9 +171,16 @@ export interface QuizState {
 export enum AppStep {
   LANDING = 'LANDING',
   CONFIG = 'CONFIG',
+  PDF_EXTRACTION_HELP = 'PDF_EXTRACTION_HELP',
   GENERATING = 'GENERATING',
   READY = 'READY',
   QUIZ = 'QUIZ',
   RESULTS = 'RESULTS',
   STUDY = 'FLASHCARDS',
 }
+
+/** Üretim ekranında dönen notlar için bağlam (GeneratingView). */
+export type GeneratingPresentation =
+  | { mode: 'quiz'; targetQuestionCount: number; batchCount: number }
+  | { mode: 'flashcards' }
+  | { mode: 'remedial'; approximateCount: number };

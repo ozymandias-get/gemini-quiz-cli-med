@@ -70,7 +70,7 @@ export class AppErrorBoundary extends Component<Props, State> {
         error.message.length > 280 ? `${error.message.slice(0, 280)}…` : error.message;
 
       return (
-        <div className="flex min-h-[100dvh] items-center justify-center bg-cream-50 px-4 dark:bg-[#171412]">
+        <div className="flex min-h-[100dvh] items-center justify-center bg-cream-50 px-4 dark:bg-app-dark">
           <div className="w-full max-w-md rounded-2xl border border-stone-200/90 bg-white/80 p-6 shadow-lg backdrop-blur-md dark:border-stone-700/60 dark:bg-stone-900/50">
             <h1 className="font-serif text-xl font-bold text-stone-900 dark:text-stone-100">
               Bir şeyler ters gitti

@@ -8,7 +8,7 @@ html {
   background-color: #fdfbf7;
 }
 html.dark {
-  background-color: #171412;
+  background-color: var(--color-app-dark);
 }
 body,
 #root {
@@ -16,6 +16,10 @@ body,
 }
 
 @theme {
+  /* Koyu tema zemin — index.html kritik stilleriyle aynı hex (#1a1614) */
+  --color-app-dark: #1a1614;
+  --color-app-dark-elevated: #231f1c;
+
   --color-cream-50: #fdfbf7;
   --color-cream-100: #fbf7f0;
   --color-cream-200: #f5efe0;
@@ -23,10 +27,17 @@ body,
   --color-cream-800: #5c5446;
   --color-cream-900: #3d382e;
 
-  --color-sand-300: #e3d5bc;
-  --color-sand-400: #dcccb0;
-  --color-sand-500: #d4c5a9;
-  --color-sand-600: #c2b295;
+  /* Kum paleti — genel olarak önceki nesle göre daha koyu / doygun */
+  --color-sand-50: #f5efe6;
+  --color-sand-100: #ebe3d4;
+  --color-sand-200: #ddd0b8;
+  --color-sand-300: #d0c2a6;
+  --color-sand-400: #bfad8c;
+  --color-sand-500: #ad9774;
+  --color-sand-600: #957f5e;
+  --color-sand-700: #7d6a4e;
+  --color-sand-800: #665543;
+  --color-sand-900: #3a3129;
 
   --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Playfair Display", ui-serif, Georgia, serif;
@@ -61,25 +72,24 @@ body,
   }
 }
 
-/* Tauri/WebView2: belge ve iç içe panellerde kaydırma */
+/* Tek pencere yüksekliği: kaydırma yalnızca #root içi panellerde (belge kaydırması yok, dvh sıçraması yok) */
 html {
   height: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
+  overflow: hidden;
 }
 
 body {
-  min-height: 100%;
+  height: 100%;
   margin: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior-y: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 #root {
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .scroll-y-pan {

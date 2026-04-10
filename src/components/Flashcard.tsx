@@ -29,7 +29,7 @@ export const Flashcard: FC<FlashcardProps> = ({
   };
 
   // Darker card background for contrast against the new container
-  const cardBgClass = "bg-white dark:bg-[#1c1917] border border-stone-200 dark:border-stone-800 shadow-2xl";
+  const cardBgClass = "bg-white dark:bg-app-dark-elevated border border-stone-200 dark:border-stone-800 shadow-2xl";
 
   const renderControls = () => (
       <div className="absolute bottom-16 flex gap-4 z-20" onClick={(e) => e.stopPropagation()}>

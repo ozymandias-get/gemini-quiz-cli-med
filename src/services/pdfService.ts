@@ -1,4 +1,4 @@
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import { isTauri } from '@tauri-apps/api/core';
 import type {
   ExtractedPdfPage,
   OpenDataLoaderElement,
@@ -8,32 +8,12 @@ import type {
   PreparedDocumentChunk,
   PreparedDocumentPage,
 } from '../types';
+import { extractPdfDocumentFromPath, extractPdfDocumentFromPayload } from './api/pdfExtract';
+import type { BackendExtractionResponse } from './api/types/pdfBackend';
 import { sanitizePDFText } from '../utils/textProcessing';
 
 const MIN_READABLE_TEXT_LENGTH = 50;
 const DEFAULT_CHUNK_CHAR_BUDGET = 6000;
-
-interface BackendPreparedPage {
-  pageNumber: number;
-  markdown: string;
-  text: string;
-  elementCount: number;
-}
-
-interface BackendArtifact {
-  kind: string;
-  path: string;
-}
-
-interface BackendExtractionResponse {
-  markdown: string;
-  text: string;
-  jsonElements: Array<Record<string, unknown>>;
-  pages: BackendPreparedPage[];
-  images: string[];
-  mode: 'local' | 'hybrid';
-  artifacts: BackendArtifact[];
-}
 
 function normalizePdfText(text: string): string {
   return sanitizePDFText(
@@ -175,11 +155,15 @@ export function buildPreparedDocumentFromExtraction(
 
 async function readFileAsBase64(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
-  let binary = '';
   const bytes = new Uint8Array(buffer);
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const slice = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...slice);
   }
+
   return btoa(binary);
 }
 
@@ -195,13 +179,7 @@ export async function preparePdfDocumentFromPath(
 ): Promise<PreparedDocument> {
   assertDesktopRuntime();
 
-  const response = await invoke<BackendExtractionResponse>('extract_pdf_document', {
-    req: {
-      path,
-      options: extractionOptions,
-      requestedFormats: ['markdown', 'json', 'text'],
-    },
-  });
+  const response = await extractPdfDocumentFromPath(path, extractionOptions);
   const preparedDocument = buildPreparedDocumentFromExtraction(response, extractionOptions);
 
   if (preparedDocument.fullText.trim().length < MIN_READABLE_TEXT_LENGTH) {
@@ -220,14 +198,7 @@ export async function preparePdfDocumentFromFile(
   assertDesktopRuntime();
 
   const base64 = await readFileAsBase64(file);
-  const response = await invoke<BackendExtractionResponse>('extract_pdf_document_payload', {
-    req: {
-      fileName: file.name,
-      base64,
-      options: extractionOptions,
-      requestedFormats: ['markdown', 'json', 'text'],
-    },
-  });
+  const response = await extractPdfDocumentFromPayload(file.name, base64, extractionOptions);
   const preparedDocument = buildPreparedDocumentFromExtraction(response, extractionOptions);
 
   if (preparedDocument.fullText.trim().length < MIN_READABLE_TEXT_LENGTH) {

@@ -1,8 +1,12 @@
 import { toast as sonnerToast } from 'sonner';
 import { TRANSLATIONS } from '../constants/translations';
 import type { LanguageCode } from '../types';
+import { matchesCliUserCancellationMessage } from './cancellation';
 
 export { toast } from 'sonner';
+
+/** Çoğu bilgi / başarı toast’u için ortak süre. */
+export const STANDARD_TOAST_DURATION_MS = 4000;
 
 const ERROR_DURATION_MS = 6000;
 const GENERATION_CANCELLED_DURATION_MS = 4500;
@@ -36,6 +40,6 @@ export function isGenerationCancelledError(err: unknown, language: LanguageCode)
   if (m === t.errors.generationCancelled) return true;
   if (m === t.toasts.generationCancelled) return true;
   if (m === 'Aborted') return true;
-  if (/iptal edildi|was cancelled|kullanıcı tarafından iptal/i.test(m)) return true;
+  if (matchesCliUserCancellationMessage(m)) return true;
   return false;
 }

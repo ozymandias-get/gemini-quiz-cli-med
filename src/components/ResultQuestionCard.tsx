@@ -78,7 +78,7 @@ export const ResultQuestionCard: FC<ResultQuestionCardProps> = ({ q, idx, userAn
         <div className="flex gap-2.5 items-start justify-between mb-3 md:mb-3.5">
           <div className="min-w-0 flex-1 flex gap-2.5 items-start">
             <span
-              className="mt-0.5 inline-flex h-7 min-w-[1.75rem] shrink-0 items-center justify-center rounded-lg bg-indigo-600 px-2 text-xs font-bold text-white shadow-sm dark:bg-indigo-500"
+              className="mt-0.5 inline-flex h-7 min-w-[1.75rem] shrink-0 items-center justify-center rounded-lg bg-sand-700 px-2 text-xs font-bold text-white shadow-sm dark:bg-sand-600 dark:text-stone-900"
               aria-label={`${t.question} ${idx + 1}`}
             >
               {idx + 1}
@@ -93,7 +93,7 @@ export const ResultQuestionCard: FC<ResultQuestionCardProps> = ({ q, idx, userAn
               onClick={handleCopyQuestion}
               title={copied ? t.copyQuestionDone : t.copyQuestion}
               aria-label={t.copyQuestionAria}
-              className="rounded-lg p-2 text-stone-400 transition-colors hover:bg-stone-100 hover:text-indigo-600 dark:hover:bg-stone-800 dark:hover:text-indigo-400"
+              className="rounded-lg p-2 text-stone-400 transition-colors hover:bg-stone-100 hover:text-sand-700 dark:hover:bg-stone-800 dark:hover:text-sand-400"
             >
               {copied ? (
                 <Check size={18} className="text-emerald-600 dark:text-emerald-400" strokeWidth={2.25} aria-hidden />
@@ -152,7 +152,7 @@ export const ResultQuestionCard: FC<ResultQuestionCardProps> = ({ q, idx, userAn
                 'border-red-200/80 bg-red-50/90 text-red-950 dark:border-red-800/60 dark:bg-red-950/25 dark:text-red-100 border-l-red-500';
             } else {
               row +=
-                'border-stone-200/70 bg-stone-50/80 text-stone-600 dark:border-stone-700/80 dark:bg-stone-800/40 dark:text-stone-400 border-l-indigo-300 dark:border-l-indigo-500/50';
+                'border-stone-200/70 bg-stone-50/80 text-stone-600 dark:border-stone-700/80 dark:bg-stone-800/40 dark:text-stone-400 border-l-sand-400 dark:border-l-sand-500/45';
             }
             return (
               <div key={optIdx} className={row}>
@@ -177,7 +177,7 @@ export const ResultQuestionCard: FC<ResultQuestionCardProps> = ({ q, idx, userAn
           <button
             type="button"
             onClick={() => setShowAiChat(!showAiChat)}
-            className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500 transition-colors hover:text-indigo-600 dark:text-stone-400 dark:hover:text-indigo-400"
+            className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-stone-500 transition-colors hover:text-sand-700 dark:text-stone-400 dark:hover:text-sand-400"
           >
             {showAiChat ? <ChevronUp size={14} /> : <MessageCircle size={14} />}
             {showAiChat ? t.hideExplanation : t.showExplanation}
@@ -187,7 +187,7 @@ export const ResultQuestionCard: FC<ResultQuestionCardProps> = ({ q, idx, userAn
             <button
               type="button"
               onClick={() => onShowSource(q)}
-              className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-indigo-600 transition-colors hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
+              className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-sand-700 transition-colors hover:text-sand-800 dark:text-sand-400 dark:hover:text-sand-300"
             >
               <BookOpen size={14} /> {t.showSource}
             </button>

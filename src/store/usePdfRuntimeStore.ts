@@ -1,5 +1,11 @@
 import { create } from 'zustand';
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import { isTauri } from '@tauri-apps/api/core';
+import {
+  pdfBootstrapRuntime,
+  pdfHybridStart,
+  pdfHybridStop,
+  pdfRuntimeStatus as fetchPdfRuntimeStatus,
+} from '../services/api/pdfRuntime';
 import type { PdfExtractionOptions, PdfHybridServerConfig, PdfRuntimeStatus } from '../types';
 
 const initialStatus: PdfRuntimeStatus = {
@@ -34,11 +40,6 @@ interface PdfRuntimeStoreActions {
 
 type PdfRuntimeStore = PdfRuntimeStoreState & PdfRuntimeStoreActions;
 
-async function invokeStatus<T>(command: string, args?: Record<string, unknown>): Promise<PdfRuntimeStatus> {
-  const result = await invoke<T>(command, args);
-  return result as PdfRuntimeStatus;
-}
-
 export const usePdfRuntimeStore = create<PdfRuntimeStore>((set, get) => ({
   status: initialStatus,
   isLoading: false,
@@ -62,7 +63,7 @@ export const usePdfRuntimeStore = create<PdfRuntimeStore>((set, get) => ({
 
     set({ isLoading: true });
     try {
-      const status = await invokeStatus<PdfRuntimeStatus>('pdf_runtime_status');
+      const status = await fetchPdfRuntimeStatus();
       set({ status });
     } catch (error) {
       set({
@@ -82,7 +83,7 @@ export const usePdfRuntimeStore = create<PdfRuntimeStore>((set, get) => ({
     if (!isTauri()) return;
     set({ isBootstrapping: true });
     try {
-      const status = await invokeStatus<PdfRuntimeStatus>('pdf_bootstrap_runtime');
+      const status = await pdfBootstrapRuntime();
       set({ status });
     } finally {
       set({ isBootstrapping: false });
@@ -93,7 +94,7 @@ export const usePdfRuntimeStore = create<PdfRuntimeStore>((set, get) => ({
     if (!isTauri()) return;
     set({ isStartingHybrid: true });
     try {
-      const status = await invokeStatus<PdfRuntimeStatus>('pdf_hybrid_start', { config });
+      const status = await pdfHybridStart(config);
       set({ status });
     } finally {
       set({ isStartingHybrid: false });
@@ -104,7 +105,7 @@ export const usePdfRuntimeStore = create<PdfRuntimeStore>((set, get) => ({
     if (!isTauri()) return;
     set({ isStoppingHybrid: true });
     try {
-      const status = await invokeStatus<PdfRuntimeStatus>('pdf_hybrid_stop');
+      const status = await pdfHybridStop();
       set({ status });
     } finally {
       set({ isStoppingHybrid: false });
@@ -116,5 +117,24 @@ export function needsPreparedDocumentRefresh(
   preparedOptions: PdfExtractionOptions | undefined,
   nextOptions: PdfExtractionOptions
 ): boolean {
-  return JSON.stringify(preparedOptions ?? null) !== JSON.stringify(nextOptions);
+  return stableStringify(preparedOptions ?? null) !== stableStringify(nextOptions);
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(sortKeysRecursively(value));
+}
+
+function sortKeysRecursively(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sortKeysRecursively(entry));
+  }
+  if (value && typeof value === 'object') {
+    return Object.keys(value as Record<string, unknown>)
+      .sort()
+      .reduce<Record<string, unknown>>((accumulator, key) => {
+        accumulator[key] = sortKeysRecursively((value as Record<string, unknown>)[key]);
+        return accumulator;
+      }, {});
+  }
+  return value;
 }

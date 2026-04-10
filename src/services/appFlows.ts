@@ -1,6 +1,7 @@
 import { flushSync } from 'react-dom';
 import { toast } from 'sonner';
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import { isTauri } from '@tauri-apps/api/core';
+import { readPdfFileInfo } from './api/pdfFiles';
 import { open } from '@tauri-apps/plugin-dialog';
 import { AppStep, type Question } from '../types';
 import { preparePdfDocumentFromPath } from './pdfService';
@@ -10,11 +11,10 @@ import { useRoutingStore } from '../store/useRoutingStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useQuizSessionStore } from '../store/useQuizSessionStore';
 import { useGenerationStore } from '../store/useGenerationStore';
-import { isGenerationCancelledError, showGenerationCancelledToast } from '../utils/toast';
+import { isGenerationCancelledError, showGenerationCancelledToast, STANDARD_TOAST_DURATION_MS } from '../utils/toast';
 import { MAX_PDF_SIZE_BYTES } from '../constants/pdfLimits';
 import { yieldMacrotask, yieldToPaint } from '../utils/asyncScheduling';
-
-const TOAST_DURATION_MS = 4000;
+import { getErrorMessage } from '../utils/errorMessage';
 
 function tNow() {
   const language = useSettingsStore.getState().language;
@@ -27,7 +27,7 @@ export function handleFileUpload() {
 
   if (!isTauri()) {
     toast.error("Bu ozellik yalnizca Tauri masaustu uygulamasinda calisir. `npm run tauri:dev` ile baslatin.", {
-      duration: TOAST_DURATION_MS,
+      duration: STANDARD_TOAST_DURATION_MS,
     });
     return;
   }
@@ -44,12 +44,10 @@ export function handleFileUpload() {
       const absolutePath = Array.isArray(selected) ? selected[0] : selected;
       if (!absolutePath) return;
 
-      const { fileName, sizeBytes } = await invoke<{ fileName: string; sizeBytes: number }>('read_pdf_file_info', {
-        path: absolutePath,
-      });
+      const { fileName, sizeBytes } = await readPdfFileInfo(absolutePath);
 
       if (sizeBytes > MAX_PDF_SIZE_BYTES) {
-        toast.error(t.errors.fileSizePdf, { duration: TOAST_DURATION_MS });
+        toast.error(t.errors.fileSizePdf, { duration: STANDARD_TOAST_DURATION_MS });
         return;
       }
 
@@ -64,9 +62,9 @@ export function handleFileUpload() {
       );
       generationState.setPreparedDocument(preparedDocument);
       generationState.setPdfText(preparedDocument.fullText);
-      toast.success(t.fileSelected, { duration: TOAST_DURATION_MS });
+      toast.success(t.fileSelected, { duration: STANDARD_TOAST_DURATION_MS });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t.errors.generic, { duration: TOAST_DURATION_MS });
+      toast.error(getErrorMessage(error, t.errors.generic), { duration: STANDARD_TOAST_DURATION_MS });
       generationState.setPdfText('');
       generationState.setPreparedDocument(null);
       generationState.setFileName('');
@@ -122,6 +120,10 @@ export async function startRemedialQuiz() {
   try {
     flushSync(() => {
       generationState.setLoadingMessage(t.remedialCreating);
+      generationState.setGeneratingPresentation({
+        mode: 'remedial',
+        approximateCount: failedQuestions.length,
+      });
       routingState.setStep(AppStep.GENERATING);
     });
     await yieldMacrotask();
@@ -138,7 +140,7 @@ export async function startRemedialQuiz() {
     );
 
     if (newQuestions.length === 0) {
-      toast.error(t.errors.noQuestions, { duration: TOAST_DURATION_MS });
+      toast.error(t.errors.noQuestions, { duration: STANDARD_TOAST_DURATION_MS });
       routingState.setStep(AppStep.RESULTS);
       return;
     }
@@ -156,20 +158,21 @@ export async function startRemedialQuiz() {
         t.toasts.questionsPartialAfterValidation
           .replace('{actual}', String(newQuestions.length))
           .replace('{requested}', String(failedQuestions.length)),
-        { duration: TOAST_DURATION_MS }
+        { duration: STANDARD_TOAST_DURATION_MS }
       );
     } else {
-      toast.success(t.ready.title, { duration: TOAST_DURATION_MS });
+      toast.success(t.ready.title, { duration: STANDARD_TOAST_DURATION_MS });
     }
     routingState.setStep(AppStep.READY);
   } catch (error) {
     if (isGenerationCancelledError(error, settingsState.language)) {
       showGenerationCancelledToast(settingsState.language);
     } else {
-      toast.error(error instanceof Error ? error.message : t.errors.noQuestions, { duration: TOAST_DURATION_MS });
+      toast.error(getErrorMessage(error, t.errors.noQuestions), { duration: STANDARD_TOAST_DURATION_MS });
     }
     routingState.setStep(AppStep.RESULTS);
   } finally {
+    generationState.setGeneratingPresentation(null);
     generationState.setGenerationAbortController(null);
     generationState.setGenerationInProgress(false);
   }
@@ -234,4 +237,8 @@ export function navigateToLanding() {
 
 export function navigateToConfig() {
   useRoutingStore.getState().setStep(AppStep.CONFIG);
+}
+
+export function navigateToPdfExtractionHelp() {
+  useRoutingStore.getState().setStep(AppStep.PDF_EXTRACTION_HELP);
 }

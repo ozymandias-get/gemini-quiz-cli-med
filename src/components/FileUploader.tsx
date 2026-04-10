@@ -22,10 +22,10 @@ export const FileUploader: FC<FileUploaderProps> = ({ pdfText, fileName, isReadi
              className={`${configPanel3dWrapClass} min-h-[240px] md:min-h-[300px] lg:min-h-0 h-full max-h-full`}
            >
               <div className={`${configPanel3dInnerClass} p-5 md:p-6 h-full max-h-full`}>
-              <div className="absolute top-0 right-0 w-64 h-64 bg-sand-200/20 dark:bg-sand-900/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute top-0 right-0 w-64 h-64 bg-sand-200/20 dark:bg-stone-700/30 rounded-full blur-3xl pointer-events-none" />
 
               <h2 className="text-lg md:text-xl font-serif font-bold mb-4 text-stone-800 dark:text-stone-100 flex items-center gap-2.5 relative z-10 shrink-0">
-                <div className="p-2 bg-sand-100 dark:bg-stone-800 rounded-xl text-sand-600 dark:text-sand-400">
+                <div className="p-2 bg-sand-100 dark:bg-stone-800 rounded-xl text-sand-600 dark:text-sand-300">
                   <Upload size={18} />
                 </div>
                 {t.uploadTitle}
@@ -36,18 +36,18 @@ export const FileUploader: FC<FileUploaderProps> = ({ pdfText, fileName, isReadi
                    {isReadingPdf ? (
                      <div className="flex-1 flex flex-col items-center justify-center">
                         <Loader2 className="w-12 h-12 animate-spin text-sand-500 mb-4" />
-                        <p className="text-stone-500 font-bold uppercase tracking-widest text-[10px] animate-pulse">{t.analyzing}</p>
+                        <p className="text-stone-600 dark:text-stone-300 font-bold uppercase tracking-widest text-[10px] animate-pulse">{t.analyzing}</p>
                      </div>
                    ) : (
                     <div className="flex-1 group/label">
-                      <div className="h-full border-2 border-dashed border-stone-200 dark:border-stone-700/50 rounded-3xl p-6 flex flex-col items-center justify-center text-center gap-4 bg-stone-50/30 dark:bg-stone-900/20 hover:bg-sand-50/50 transition-all duration-300">
-                        <div className="w-16 h-16 bg-white dark:bg-stone-800 rounded-2xl flex items-center justify-center shadow-md">
-                          <FileText size={30} className="text-stone-400" />
+                      <div className="h-full border-2 border-dashed border-stone-200 dark:border-stone-500/55 rounded-3xl p-6 flex flex-col items-center justify-center text-center gap-4 bg-stone-50/30 dark:bg-stone-950/65 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:bg-sand-50/50 dark:hover:bg-stone-950/80 transition-all duration-300">
+                        <div className="w-16 h-16 bg-white dark:bg-stone-900 rounded-2xl flex items-center justify-center shadow-md dark:border dark:border-stone-600/50 dark:shadow-none">
+                          <FileText size={30} className="text-stone-500 dark:text-sand-400" />
                         </div>
-                        <div className="space-y-1">
-                           <p className="text-base text-stone-800 dark:text-stone-100 font-bold">{t.features.upload}</p>
-                           <p className="text-[11px] text-stone-500 dark:text-stone-400 font-medium px-4">{t.uploadDesc}</p>
-                           <p className="text-[11px] text-stone-500 dark:text-stone-400 font-medium px-4">{t.uploadLimitsHint}</p>
+                        <div className="space-y-1.5">
+                           <p className="text-base text-stone-800 dark:text-stone-50 font-bold">{t.features.upload}</p>
+                           <p className="text-[11px] text-stone-600 dark:text-stone-200/95 font-medium px-4 leading-relaxed">{t.uploadDesc}</p>
+                           <p className="text-[11px] text-stone-600 dark:text-stone-300 font-medium px-4 leading-relaxed">{t.uploadLimitsHint}</p>
                            <button
                              type="button"
                              onClick={onUpload}
@@ -66,10 +66,10 @@ export const FileUploader: FC<FileUploaderProps> = ({ pdfText, fileName, isReadi
                       <CheckCircle size={32} />
                    </div>
                    <h3 className="text-lg font-bold text-stone-800 dark:text-stone-100 mb-1">{t.fileSelected}</h3>
-                   <p className="text-[11px] font-mono text-stone-500 mb-6 truncate max-w-full px-6">{fileName}</p>
+                   <p className="text-[11px] font-mono text-stone-600 dark:text-stone-300 mb-6 truncate max-w-full px-6">{fileName}</p>
                    <div className="flex w-full max-w-xs flex-col items-stretch gap-2.5 sm:max-w-none sm:flex-row sm:justify-center">
                    <button type="button" onClick={onUpload} className="cursor-pointer flex-1 sm:flex-none">
-                      <span className="text-xs font-bold text-stone-500 uppercase tracking-widest flex items-center justify-center gap-2 px-6 py-3 bg-stone-100 dark:bg-stone-800 rounded-xl w-full">
+                      <span className="text-xs font-bold text-stone-600 dark:text-stone-200 uppercase tracking-widest flex items-center justify-center gap-2 px-6 py-3 bg-stone-100 dark:bg-stone-800 rounded-xl w-full">
                         <RefreshCw size={14} /> {t.changeFile}
                       </span>
                    </button>

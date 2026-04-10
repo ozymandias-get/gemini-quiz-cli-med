@@ -9,10 +9,12 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const PAGE_MARKER: &str = "<<<QUIZLAB_PAGE_%page-number%>>>";
 const DEFAULT_HYBRID_PORT: u16 = 5002;
+const GENERATION_LOG_EVENT: &str = "quizlab://generation-log";
+const CLI_LOG_PREVIEW_CHARS: usize = 240;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,6 +118,16 @@ pub struct ReadPdfFileInfoResponse {
     pub size_bytes: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GenerationLogPayload {
+    stage: String,
+    message: String,
+    level: String,
+    timestamp: u128,
+    meta: Option<Value>,
+}
+
 struct HybridProcessState {
     child: Child,
     url: String,
@@ -156,6 +168,39 @@ fn now_millis() -> u128 {
         .as_millis()
 }
 
+fn truncate_for_log(value: &str, max_chars: usize) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for (idx, ch) in trimmed.chars().enumerate() {
+        if idx >= max_chars {
+            out.push_str("...");
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn emit_generation_log(
+    app: &AppHandle,
+    stage: &str,
+    message: impl Into<String>,
+    level: &str,
+    meta: Option<Value>,
+) {
+    let payload = GenerationLogPayload {
+        stage: stage.to_string(),
+        message: message.into(),
+        level: level.to_string(),
+        timestamp: now_millis(),
+        meta,
+    };
+    let _ = app.emit(GENERATION_LOG_EVENT, payload);
+}
+
 fn with_command_env(command: &mut Command, java_home: &Path, cache_dir: &Path) {
     let java_bin = java_home.join("bin");
     let mut paths = vec![java_bin];
@@ -168,6 +213,18 @@ fn with_command_env(command: &mut Command, java_home: &Path, cache_dir: &Path) {
     command.env("JAVA_HOME", java_home);
     command.env("PIP_CACHE_DIR", cache_dir);
     command.env("PYTHONUTF8", "1");
+    command.env("PYTHONIOENCODING", "utf-8");
+
+    // Force JVM stdout/stderr to UTF-8 so opendataloader wrapper
+    // does not fail on Windows locale-specific bytes (cp1254, cp1252, ...).
+    let forced_java_encoding =
+        "-Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8";
+    let merged_java_tool_options = std::env::var("JAVA_TOOL_OPTIONS")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("{value} {forced_java_encoding}"))
+        .unwrap_or_else(|| forced_java_encoding.to_string());
+    command.env("JAVA_TOOL_OPTIONS", merged_java_tool_options);
 }
 
 fn parse_major_java_version(version_text: &str) -> Option<u32> {
@@ -199,7 +256,7 @@ fn ensure_runtime_paths(app: &AppHandle) -> Result<RuntimePaths, String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("App data dizini bulunamadi: {e}"))?;
+        .map_err(|e| format!("App data dizini bulunamadı: {e}"))?;
     let runtime_dir = app_data_dir.join("runtime");
     let venv_dir = runtime_dir.join("venv");
     let cache_dir = runtime_dir.join("cache");
@@ -207,7 +264,7 @@ fn ensure_runtime_paths(app: &AppHandle) -> Result<RuntimePaths, String> {
     let logs_dir = runtime_dir.join("logs");
 
     for path in [&runtime_dir, &cache_dir, &jobs_dir, &logs_dir] {
-        fs::create_dir_all(path).map_err(|e| format!("Dizin olusturulamadi ({}): {e}", path.display()))?;
+        fs::create_dir_all(path).map_err(|e| format!("Dizin oluşturulamadı ({}): {e}", path.display()))?;
     }
 
     Ok(RuntimePaths {
@@ -260,7 +317,7 @@ fn resolve_java(app: &AppHandle) -> Result<ResolvedJava, String> {
     let resource_dir = app
         .path()
         .resource_dir()
-        .map_err(|e| format!("Resource dizini okunamadi: {e}"))?;
+        .map_err(|e| format!("Resource dizini okunamadı: {e}"))?;
     let jre_root = resource_dir.join("jre");
 
     let mut search_roots = vec![jre_root];
@@ -286,7 +343,7 @@ fn resolve_java(app: &AppHandle) -> Result<ResolvedJava, String> {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
-            .map_err(|e| format!("Java surumu okunamadi: {e}"))?;
+            .map_err(|e| format!("Java sürümü okunamadı: {e}"))?;
         let version_text = {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             if stderr.is_empty() {
@@ -306,7 +363,7 @@ fn resolve_java(app: &AppHandle) -> Result<ResolvedJava, String> {
         }
     }
 
-    Err("Bundled Java 11+ runtime bulunamadi. `src-tauri/resources/jre` altina Temurin JRE 21 ekleyin.".to_string())
+    Err("Bundled Java 11+ runtime bulunamadı. `src-tauri/resources/jre` altına Temurin JRE 21 ekleyin.".to_string())
 }
 
 fn resolve_python() -> Result<ResolvedPython, String> {
@@ -362,7 +419,7 @@ fn resolve_python() -> Result<ResolvedPython, String> {
         });
     }
 
-    Err("Python 3.10+ bulunamadi.".to_string())
+    Err("Python 3.10+ bulunamadı.".to_string())
 }
 
 fn venv_python_path(venv_dir: &Path) -> PathBuf {
@@ -403,18 +460,48 @@ fn bootstrap_runtime_impl(app: &AppHandle) -> Result<PdfRuntimeStatus, String> {
     let venv_python = venv_python_path(&runtime_paths.venv_dir);
 
     if !venv_python.exists() {
+        emit_generation_log(
+            app,
+            "runtime.bootstrap",
+            "Python virtual environment olusturuluyor.",
+            "info",
+            Some(serde_json::json!({
+                "venvPath": runtime_paths.venv_dir.to_string_lossy()
+            })),
+        );
         let status = Command::new(&python.program)
             .args(&python.prefix_args)
             .args(["-m", "venv"])
             .arg(&runtime_paths.venv_dir)
             .status()
-            .map_err(|e| format!("Python virtualenv olusturulamadi: {e}"))?;
+            .map_err(|e| format!("Python virtualenv oluşturulamadı: {e}"))?;
         if !status.success() {
-            return Err("Python virtualenv olusturulamadi.".to_string());
+            emit_generation_log(
+                app,
+                "runtime.bootstrap",
+                "Python virtual environment olusturulamadi.",
+                "error",
+                None,
+            );
+            return Err("Python virtualenv oluşturulamadı.".to_string());
         }
+        emit_generation_log(
+            app,
+            "runtime.bootstrap",
+            "Python virtual environment hazirlandi.",
+            "success",
+            None,
+        );
     }
 
     if !runtime_is_bootstrapped(&runtime_paths.venv_dir) {
+        emit_generation_log(
+            app,
+            "runtime.bootstrap",
+            "OpenDataLoader bagimliliklari kuruluyor.",
+            "info",
+            None,
+        );
         let mut install = Command::new(&venv_python);
         with_command_env(&mut install, &java.java_home, &runtime_paths.cache_dir);
         let status = install
@@ -427,10 +514,24 @@ fn bootstrap_runtime_impl(app: &AppHandle) -> Result<PdfRuntimeStatus, String> {
                 "opendataloader-pdf[hybrid]",
             ])
             .status()
-            .map_err(|e| format!("OpenDataLoader kurulumu baslatilamadi: {e}"))?;
+            .map_err(|e| format!("OpenDataLoader kurulumu başlatılamadı: {e}"))?;
         if !status.success() {
-            return Err("OpenDataLoader kurulumu basarisiz oldu.".to_string());
+            emit_generation_log(
+                app,
+                "runtime.bootstrap",
+                "OpenDataLoader kurulumu basarisiz oldu.",
+                "error",
+                None,
+            );
+            return Err("OpenDataLoader kurulumu başarısız oldu.".to_string());
         }
+        emit_generation_log(
+            app,
+            "runtime.bootstrap",
+            "OpenDataLoader kurulumu tamamlandi.",
+            "success",
+            None,
+        );
     }
 
     pdf_runtime_status_impl(app, None)
@@ -491,8 +592,8 @@ fn pdf_runtime_status_impl(app: &AppHandle, state: Option<&PdfRuntimeState>) -> 
     let status_message = match (&java, &python) {
         (Err(java_error), _) => Some(java_error.clone()),
         (_, Err(python_error)) => Some(python_error.clone()),
-        _ if runtime_bootstrapped && cli_ready => Some("OpenDataLoader runtime hazir.".to_string()),
-        _ => Some("Runtime bootstrap gerekiyor.".to_string()),
+        _ if runtime_bootstrapped && cli_ready => Some("OpenDataLoader çalışma ortamı hazır.".to_string()),
+        _ => Some("Çalışma ortamı bootstrap gerekiyor.".to_string()),
     };
 
     Ok(PdfRuntimeStatus {
@@ -527,6 +628,13 @@ fn start_hybrid_impl(
     let runtime_paths = ensure_runtime_paths(app)?;
     let java = resolve_java(app)?;
     let _ = bootstrap_runtime_impl(app)?;
+    emit_generation_log(
+        app,
+        "hybrid.start",
+        "Hybrid backend baslatma hazirligi.",
+        "info",
+        None,
+    );
 
     {
         let mut guard = state.hybrid_process.lock().unwrap();
@@ -549,17 +657,17 @@ fn start_hybrid_impl(
     }
 
     let cli_path = find_venv_cli(&runtime_paths.venv_dir, "opendataloader-pdf-hybrid")
-        .ok_or_else(|| "Hybrid CLI bulunamadi. Runtime bootstrap tamamlanmamis.".to_string())?;
+        .ok_or_else(|| "Hibrit CLI bulunamadı. Çalışma ortamı bootstrap tamamlanmamış.".to_string())?;
     let url = build_hybrid_url(&config);
     let log_path = runtime_paths.logs_dir.join("opendataloader-hybrid.log");
     let stdout = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&log_path)
-        .map_err(|e| format!("Hybrid log dosyasi acilamadi: {e}"))?;
+        .map_err(|e| format!("Hibrit log dosyası açılamadı: {e}"))?;
     let stderr = stdout
         .try_clone()
-        .map_err(|e| format!("Hybrid log handle klonlanamadi: {e}"))?;
+        .map_err(|e| format!("Hibrit log handle klonlanamadı: {e}"))?;
 
     let mut command = Command::new(cli_path);
     with_command_env(&mut command, &java.java_home, &runtime_paths.cache_dir);
@@ -584,7 +692,14 @@ fn start_hybrid_impl(
 
     let child = command
         .spawn()
-        .map_err(|e| format!("Hybrid backend baslatilamadi: {e}"))?;
+        .map_err(|e| format!("Hibrit backend başlatılamadı: {e}"))?;
+    emit_generation_log(
+        app,
+        "hybrid.start",
+        format!("Hybrid backend prosesi baslatildi: {url}"),
+        "info",
+        None,
+    );
 
     {
         let mut guard = state.hybrid_process.lock().unwrap();
@@ -604,11 +719,28 @@ fn start_hybrid_impl(
     });
 
     if !started {
+        emit_generation_log(
+            app,
+            "hybrid.start",
+            "Hybrid backend healthcheck timeout.",
+            "error",
+            Some(serde_json::json!({
+                "url": url,
+                "logPath": log_path.to_string_lossy()
+            })),
+        );
         return Err(format!(
-            "Hybrid backend {url} adresinde saglikli sekilde acilamadi. Log: {}",
+            "Hibrit backend {url} adresinde sağlıklı şekilde açılamadı. Log: {}",
             log_path.display()
         ));
     }
+    emit_generation_log(
+        app,
+        "hybrid.start",
+        "Hybrid backend saglikli.",
+        "success",
+        Some(serde_json::json!({ "url": url })),
+    );
 
     pdf_runtime_status_impl(app, Some(state))
 }
@@ -650,22 +782,23 @@ fn run_cli_capture(
     java_home: &Path,
     cache_dir: &Path,
     args: &[String],
-) -> Result<(), String> {
+) -> Result<(u128, String, String), String> {
+    let started_at = now_millis();
     let mut command = Command::new(cli_path);
     with_command_env(&mut command, java_home, cache_dir);
+    command.args(args);
     let output = command
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
         .output()
-        .map_err(|e| format!("OpenDataLoader komutu baslatilamadi: {e}"))?;
+        .map_err(|e| format!("CLI komutu çalıştırılamadı: {e}"))?;
+
+    let elapsed_ms = now_millis().saturating_sub(started_at);
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
     if output.status.success() {
-        return Ok(());
+        return Ok((elapsed_ms, stdout, stderr));
     }
 
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     Err(if stderr.is_empty() { stdout } else { stderr })
 }
 
@@ -765,15 +898,53 @@ fn extract_impl(
     state: &PdfRuntimeState,
     request: ExtractPdfDocumentRequest,
 ) -> Result<ExtractPdfDocumentResponse, String> {
+    emit_generation_log(
+        app,
+        "pdf.extract",
+        "PDF cikarma islemi baslatildi.",
+        "info",
+        Some(serde_json::json!({ "path": request.path.as_str() })),
+    );
+
     let runtime_paths = ensure_runtime_paths(app)?;
+    emit_generation_log(
+        app,
+        "runtime.paths",
+        "Runtime dizinleri hazirlandi.",
+        "success",
+        Some(serde_json::json!({
+            "venvDir": runtime_paths.venv_dir.to_string_lossy(),
+            "jobsDir": runtime_paths.jobs_dir.to_string_lossy()
+        })),
+    );
+
     let java = resolve_java(app)?;
+    emit_generation_log(
+        app,
+        "runtime.java",
+        "Java runtime dogrulandi.",
+        "success",
+        Some(serde_json::json!({
+            "javaPath": java.java_exe.to_string_lossy(),
+            "javaVersion": java.version
+        })),
+    );
+
     let _ = bootstrap_runtime_impl(app)?;
+    emit_generation_log(
+        app,
+        "runtime.bootstrap",
+        "Runtime bootstrap kontrolu tamamlandi.",
+        "success",
+        None,
+    );
+
     let cli_path = find_venv_cli(&runtime_paths.venv_dir, "opendataloader-pdf")
-        .ok_or_else(|| "OpenDataLoader CLI bulunamadi.".to_string())?;
+        .ok_or_else(|| "OpenDataLoader CLI bulunamadı.".to_string())?;
 
     let input_path = PathBuf::from(request.path.trim());
     if !input_path.exists() {
-        return Err(format!("PDF dosyasi bulunamadi: {}", input_path.display()));
+        return Err(format!("PDF dosyası bulunamadı: {}", input_path.display()));
     }
 
     let options = request.options.unwrap_or_default();
@@ -784,13 +955,27 @@ fn extract_impl(
 
     let job_dir = runtime_paths.jobs_dir.join(format!("job-{}", now_millis()));
     let output_dir = job_dir.join("output");
-    fs::create_dir_all(&output_dir).map_err(|e| format!("Cikis dizini olusturulamadi: {e}"))?;
+    fs::create_dir_all(&output_dir).map_err(|e| format!("Çıkış dizini oluşturulamadı: {e}"))?;
 
     let needs_hybrid = options
         .hybrid
         .as_ref()
         .map(|value| !value.trim().is_empty() && !value.eq_ignore_ascii_case("off"))
         .unwrap_or(false);
+    emit_generation_log(
+        app,
+        "hybrid.mode",
+        if needs_hybrid {
+            "Hybrid extraction modu secildi."
+        } else {
+            "Local extraction modu secildi."
+        },
+        "info",
+        Some(serde_json::json!({
+            "hybrid": options.hybrid,
+            "hybridMode": options.hybrid_mode
+        })),
+    );
 
     let hybrid_url = if needs_hybrid {
         if let Some(url) = options.hybrid_url.as_ref().filter(|value| !value.trim().is_empty()) {
@@ -877,28 +1062,109 @@ fn extract_impl(
         }
     }
 
-    run_cli_capture(&cli_path, &java.java_home, &runtime_paths.cache_dir, &args)?;
+    let sanitized_args: Vec<String> = args
+        .iter()
+        .map(|arg| {
+            if arg == &input_path.to_string_lossy().to_string() {
+                "[pdf-path]".to_string()
+            } else if arg == &output_dir.to_string_lossy().to_string() {
+                "[output-dir]".to_string()
+            } else if arg.starts_with("http://") || arg.starts_with("https://") {
+                "[url]".to_string()
+            } else {
+                arg.clone()
+            }
+        })
+        .collect();
+    emit_generation_log(
+        app,
+        "cli.extract",
+        "OpenDataLoader CLI baslatiliyor.",
+        "info",
+        Some(serde_json::json!({
+            "cliPath": cli_path.to_string_lossy(),
+            "args": sanitized_args
+        })),
+    );
+
+    let (cli_elapsed_ms, cli_stdout, cli_stderr) = match run_cli_capture(
+        &cli_path,
+        &java.java_home,
+        &runtime_paths.cache_dir,
+        &args,
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            emit_generation_log(
+                app,
+                "cli.extract",
+                "OpenDataLoader CLI hata ile sonlandi.",
+                "error",
+                Some(serde_json::json!({ "error": error })),
+            );
+            return Err(error);
+        }
+    };
+    emit_generation_log(
+        app,
+        "cli.extract",
+        "OpenDataLoader CLI basariyla tamamlandi.",
+        "success",
+        Some(serde_json::json!({
+            "elapsedMs": cli_elapsed_ms,
+            "stdoutPreview": truncate_for_log(&cli_stdout, CLI_LOG_PREVIEW_CHARS),
+            "stderrPreview": truncate_for_log(&cli_stderr, CLI_LOG_PREVIEW_CHARS)
+        })),
+    );
 
     let markdown_path = first_file_with_extension(&output_dir, "md")
-        .ok_or_else(|| "Markdown cikti dosyasi bulunamadi.".to_string())?;
+        .ok_or_else(|| "Markdown çıktı dosyası bulunamadı.".to_string())?;
     let text_path = first_file_with_extension(&output_dir, "txt")
-        .ok_or_else(|| "Text cikti dosyasi bulunamadi.".to_string())?;
+        .ok_or_else(|| "Text çıktı dosyası bulunamadı.".to_string())?;
     let json_path = first_file_with_extension(&output_dir, "json")
-        .ok_or_else(|| "JSON cikti dosyasi bulunamadi.".to_string())?;
+        .ok_or_else(|| "JSON çıktı dosyası bulunamadı.".to_string())?;
 
     let markdown =
-        fs::read_to_string(&markdown_path).map_err(|e| format!("Markdown cikti okunamadi: {e}"))?;
-    let text = fs::read_to_string(&text_path).map_err(|e| format!("Text cikti okunamadi: {e}"))?;
+        fs::read_to_string(&markdown_path).map_err(|e| format!("Markdown çıktı okunamadı: {e}"))?;
+    let text = fs::read_to_string(&text_path).map_err(|e| format!("Text çıktı okunamadı: {e}"))?;
     let json_content =
-        fs::read_to_string(&json_path).map_err(|e| format!("JSON cikti okunamadi: {e}"))?;
+        fs::read_to_string(&json_path).map_err(|e| format!("JSON çıktı okunamadı: {e}"))?;
     let json_value: Value =
         serde_json::from_str(&json_content).map_err(|e| format!("JSON parse edilemedi: {e}"))?;
 
+    if markdown.trim().is_empty() && text.trim().is_empty() {
+        return Err("PDF çıkarım sonucu boş içerik döndü (markdown/text).".to_string());
+    }
+
     let mut json_elements = Vec::new();
     collect_json_elements(&json_value, &mut json_elements);
+    emit_generation_log(
+        app,
+        "pdf.outputs",
+        "CLI ciktilari okundu ve parse edildi.",
+        "success",
+        Some(serde_json::json!({
+            "markdownPath": markdown_path.to_string_lossy(),
+            "textPath": text_path.to_string_lossy(),
+            "jsonPath": json_path.to_string_lossy(),
+            "jsonElementCount": json_elements.len()
+        })),
+    );
 
     let markdown_pages = split_pages(&markdown);
     let text_pages = split_pages(&text);
+    if markdown_pages.len().abs_diff(text_pages.len()) > 2 {
+        emit_generation_log(
+            app,
+            "pdf.pages",
+            "Markdown/Text sayfa sayisi belirgin farkli.",
+            "warning",
+            Some(serde_json::json!({
+                "markdownPages": markdown_pages.len(),
+                "textPages": text_pages.len()
+            })),
+        );
+    }
     let page_count = markdown_pages.len().max(text_pages.len()).max(1);
     let mut pages = Vec::new();
     for index in 0..page_count {
@@ -914,6 +1180,15 @@ fn extract_impl(
             element_count,
         });
     }
+    emit_generation_log(
+        app,
+        "pdf.pages",
+        "Sayfa bazli icerik olusturuldu.",
+        "success",
+        Some(serde_json::json!({
+            "pageCount": page_count
+        })),
+    );
 
     let mut artifacts = vec![
         PdfArtifactPayload {
@@ -942,6 +1217,17 @@ fn extract_impl(
         });
     }
 
+    emit_generation_log(
+        app,
+        "pdf.extract",
+        "PDF cikarma islemi tamamlandi.",
+        "success",
+        Some(serde_json::json!({
+            "mode": if needs_hybrid { "hybrid" } else { "local" },
+            "artifacts": artifacts.len()
+        })),
+    );
+
     Ok(ExtractPdfDocumentResponse {
         markdown,
         text,
@@ -965,14 +1251,14 @@ pub async fn pdf_runtime_status(
     let runtime_state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || pdf_runtime_status_impl(&app, Some(&runtime_state)))
         .await
-        .map_err(|e| format!("PDF runtime status okunamadi: {e}"))?
+        .map_err(|e| format!("PDF çalışma ortamı durumu okunamadı: {e}"))?
 }
 
 #[tauri::command]
 pub async fn pdf_bootstrap_runtime(app: AppHandle) -> Result<PdfRuntimeStatus, String> {
     tauri::async_runtime::spawn_blocking(move || bootstrap_runtime_impl(&app))
         .await
-        .map_err(|e| format!("PDF runtime bootstrap sonlandi: {e}"))?
+        .map_err(|e| format!("PDF çalışma ortamı başlatma işlemi sonlandı: {e}"))?
 }
 
 #[tauri::command]
@@ -988,7 +1274,7 @@ pub async fn pdf_hybrid_start(
     let runtime_state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || start_hybrid_impl(&app, &runtime_state, config))
         .await
-        .map_err(|e| format!("Hybrid backend baslatma islemi sonlandi: {e}"))?
+        .map_err(|e| format!("Hibrit arka plan başlatma işlemi sonlandı: {e}"))?
 }
 
 #[tauri::command]
@@ -999,7 +1285,7 @@ pub async fn pdf_hybrid_stop(
     let runtime_state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || stop_hybrid_impl(&app, &runtime_state))
         .await
-        .map_err(|e| format!("Hybrid backend durdurma islemi sonlandi: {e}"))?
+        .map_err(|e| format!("Hibrit arka plan durdurma işlemi sonlandı: {e}"))?
 }
 
 #[tauri::command]
@@ -1011,7 +1297,7 @@ pub async fn extract_pdf_document(
     let runtime_state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || extract_impl(&app, &runtime_state, req))
         .await
-        .map_err(|e| format!("PDF extraction islemi sonlandi: {e}"))?
+        .map_err(|e| format!("PDF çıkarma işlemi sonlandı: {e}"))?
 }
 
 #[tauri::command]
@@ -1020,24 +1306,38 @@ pub async fn extract_pdf_document_payload(
     state: State<'_, PdfRuntimeState>,
     req: ExtractPdfPayloadRequest,
 ) -> Result<ExtractPdfDocumentResponse, String> {
+    emit_generation_log(
+        &app,
+        "pdf.payload",
+        "PDF payload decode baslatildi.",
+        "info",
+        Some(serde_json::json!({ "fileName": req.file_name })),
+    );
     let file_name = req.file_name.trim();
     if file_name.is_empty() {
-        return Err("Dosya adi bos.".to_string());
+        return Err("Dosya adı boş.".to_string());
     }
     let runtime_paths = ensure_runtime_paths(&app)?;
     let temp_input_dir = runtime_paths.jobs_dir.join(format!("payload-{}", now_millis()));
     fs::create_dir_all(&temp_input_dir)
-        .map_err(|e| format!("Gecici payload dizini olusturulamadi: {e}"))?;
+        .map_err(|e| format!("Geçici payload dizini oluşturulamadı: {e}"))?;
     let file_path = temp_input_dir.join(file_name);
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(req.base64.trim())
         .map_err(|e| format!("Payload decode edilemedi: {e}"))?;
-    let mut file = File::create(&file_path).map_err(|e| format!("Gecici dosya olusturulamadi: {e}"))?;
+    let mut file = File::create(&file_path).map_err(|e| format!("Geçici dosya oluşturulamadı: {e}"))?;
     file.write_all(&bytes)
-        .map_err(|e| format!("Gecici dosya yazilamadi: {e}"))?;
+        .map_err(|e| format!("Geçici dosya yazılamadı: {e}"))?;
+    emit_generation_log(
+        &app,
+        "pdf.payload",
+        "Payload gecici dosyaya yazildi.",
+        "success",
+        Some(serde_json::json!({ "tempPath": file_path.to_string_lossy(), "bytes": bytes.len() })),
+    );
 
     let result = extract_pdf_document(
-        app,
+        app.clone(),
         state,
         ExtractPdfDocumentRequest {
             path: file_path.to_string_lossy().into_owned(),
@@ -1048,6 +1348,13 @@ pub async fn extract_pdf_document_payload(
     .await;
 
     let _ = fs::remove_dir_all(&temp_input_dir);
+    emit_generation_log(
+        &app,
+        "pdf.payload",
+        "Payload gecici dosyalari temizlendi.",
+        "info",
+        None,
+    );
     result
 }
 
@@ -1055,7 +1362,7 @@ pub async fn extract_pdf_document_payload(
 pub fn read_pdf_file_info(path: String) -> Result<ReadPdfFileInfoResponse, String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
-        return Err("PDF yolu bos.".to_string());
+        return Err("PDF yolu boş.".to_string());
     }
 
     let file_path = Path::new(trimmed);
@@ -1065,10 +1372,10 @@ pub fn read_pdf_file_info(path: String) -> Result<ReadPdfFileInfoResponse, Strin
         .map(|value| value.to_ascii_lowercase())
         .unwrap_or_default();
     if extension != "pdf" {
-        return Err("Sadece .pdf dosyalari desteklenir.".to_string());
+        return Err("Sadece .pdf dosyaları desteklenir.".to_string());
     }
 
-    let metadata = fs::metadata(file_path).map_err(|e| format!("PDF metadata okunamadi: {e}"))?;
+    let metadata = fs::metadata(file_path).map_err(|e| format!("PDF meta verileri okunamadı: {e}"))?;
     let file_name = file_path
         .file_name()
         .and_then(|value| value.to_str())

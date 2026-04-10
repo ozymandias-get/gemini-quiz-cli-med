@@ -12,14 +12,14 @@ export const RegenerationBanner: FC<{ t: Pick<TranslationContent, 'regenerateAct
     animate={{ height: 'auto', opacity: 1, scale: 1 }}
     exit={{ height: 0, opacity: 0, scale: 0.95 }}
     transition={{ duration: 0.3, ease: 'easeOut' }}
-    className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/30 dark:to-purple-900/30 border border-indigo-200/50 dark:border-indigo-800/50 rounded-2xl p-2.5 lg:p-2 flex gap-2.5 mb-2 lg:mb-2 shrink-0 shadow-inner"
+    className="bg-gradient-to-r from-sand-100 to-amber-50/90 dark:from-sand-900/35 dark:to-amber-950/25 border border-sand-200/80 dark:border-sand-700/45 rounded-2xl p-2.5 lg:p-2 flex gap-2.5 mb-2 lg:mb-2 shrink-0 shadow-inner"
   >
-    <div className="p-2 bg-indigo-100/80 dark:bg-indigo-800/80 rounded-xl text-indigo-600 dark:text-indigo-300 shrink-0 h-fit shadow-sm">
+    <div className="p-2 bg-sand-200/90 dark:bg-stone-800/85 rounded-xl text-sand-800 dark:text-sand-400 shrink-0 h-fit shadow-sm">
       <RefreshCw size={16} className="animate-spin-slow" />
     </div>
     <div className="min-w-0">
-      <h4 className="text-xs font-bold text-indigo-950 dark:text-indigo-200 mb-0.5">{t.regenerateActive}</h4>
-      <p className="text-[11px] text-indigo-700/90 dark:text-indigo-300/80 leading-relaxed font-medium">{t.regenerateActiveDesc}</p>
+      <h4 className="text-xs font-bold text-stone-900 dark:text-sand-200 mb-0.5">{t.regenerateActive}</h4>
+      <p className="text-[11px] text-stone-700/95 dark:text-stone-300/90 leading-relaxed font-medium">{t.regenerateActiveDesc}</p>
     </div>
   </motion.div>
 );

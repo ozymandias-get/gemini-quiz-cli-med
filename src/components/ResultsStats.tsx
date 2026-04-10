@@ -104,7 +104,7 @@ export const ResultsStats: FC<ResultsStatsProps> = ({
           {hasMistakes && (
              <Button 
                 onClick={onRetryMistakes} 
-                className="bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-500/20 shadow-lg border-none py-3 md:py-4"
+                className="bg-sand-700 text-white hover:bg-sand-600 dark:bg-sand-600 dark:text-stone-900 dark:hover:bg-sand-500 shadow-sand-900/20 dark:shadow-sand-900/30 shadow-lg border-none py-3 md:py-4"
                 fullWidth
              >
                 <Zap size={18} fill="currentColor" /> {t.remedialBtn}

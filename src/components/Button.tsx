@@ -24,7 +24,7 @@ export const Button: FC<ButtonProps> = ({
     primary: "bg-stone-900 text-white shadow-lg shadow-stone-900/10 hover:bg-black dark:bg-sand-500 dark:text-stone-900 dark:hover:bg-sand-400 dark:shadow-sand-500/20",
     secondary: "bg-sand-500 text-white shadow-md shadow-sand-500/10 hover:bg-sand-600 dark:bg-stone-700 dark:text-white dark:hover:bg-stone-600",
     outline: "border-2 border-stone-200 bg-transparent text-stone-600 hover:border-stone-800 hover:text-stone-800 dark:border-stone-700 dark:text-stone-300 dark:hover:border-sand-500 dark:hover:text-sand-500",
-    glass: "bg-white/40 dark:bg-stone-800/40 backdrop-blur-md border border-white/50 dark:border-stone-700/50 text-stone-800 dark:text-stone-100 hover:bg-white/60 dark:hover:bg-stone-800/60 shadow-sm",
+    glass: "bg-gradient-to-br from-white/60 to-white/20 dark:from-white/10 dark:to-transparent backdrop-blur-md backdrop-saturate-150 border border-white/50 border-b-white/10 border-r-white/10 dark:border-white/10 dark:border-b-transparent dark:border-r-transparent text-stone-800 dark:text-stone-100 hover:from-white/80 hover:to-white/40 dark:hover:from-white/20 dark:hover:to-white/5 shadow-lg shadow-black/5 hover:shadow-black/10 dark:shadow-black/30 dark:hover:shadow-black/40 ring-1 ring-transparent hover:ring-white/50 dark:hover:ring-white/20 transition-all duration-300",
     custom: ""
   };
 

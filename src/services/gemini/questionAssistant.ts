@@ -11,8 +11,8 @@ export async function askQuestionAssistant(
 ) {
   const model = ModelType.FLASH_2_5;
   const correctAnswer = question.options[question.correctAnswerIndex];
-  const historyUserLabel = language === 'en' ? 'Student' : 'Ogrenci';
-  const historyModelLabel = language === 'en' ? 'Teacher' : 'Ogretmen';
+  const historyUserLabel = language === 'en' ? 'Student' : 'Öğrenci';
+  const historyModelLabel = language === 'en' ? 'Teacher' : 'Öğretmen';
 
   const promptBody = `
 You are a friendly, patient, and highly knowledgeable medical tutor.
@@ -28,7 +28,7 @@ The student is reviewing a multiple-choice question and is asking you about it.
 1. Explain the underlying pathophysiology or mechanism behind the student's confusion.
 2. If they ask why an option is wrong, break down that distractor specifically.
 3. Keep answers concise and clear.
-4. Reply in ${language === 'tr' ? 'Turkish' : 'English'}.
+4. Reply in ${language === 'tr' ? 'Türkçe' : 'English'}.
 5. Use markdown formatting. Do NOT output JSON.
 
 ### CHAT HISTORY

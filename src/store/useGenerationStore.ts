@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
-import type { PreparedDocument, Question } from '../types';
+import { isTauri } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import type { GeneratingPresentation, GenerationLogEntry, PreparedDocument, Question } from '../types';
 import { useRoutingStore } from './useRoutingStore';
 import { useSettingsStore } from './useSettingsStore';
 import { useQuizSessionStore } from './useQuizSessionStore';
@@ -8,6 +10,10 @@ import { notifyIfOffline } from '../utils/toast';
 import { runFlashcardGenerationFlow, runQuizGenerationFlow } from '../services/usecases/generationFlow';
 import { preparePdfDocumentFromPath } from '../services/pdfService';
 import { needsPreparedDocumentRefresh } from './usePdfRuntimeStore';
+import { getErrorMessage } from '../utils/errorMessage';
+
+const GENERATION_LOG_EVENT = 'quizlab://generation-log';
+const MAX_GENERATION_LOGS = 200;
 
 interface GenerationStoreState {
   pdfText: string;
@@ -19,6 +25,12 @@ interface GenerationStoreState {
   usedQuestions: Question[];
   generationInProgress: boolean;
   generationAbortController: AbortController | null;
+  generationLogs: GenerationLogEntry[];
+  debugPanelOpen: boolean;
+  autoScrollLogs: boolean;
+  generationLogListenerReady: boolean;
+  generationLogUnlisten: (() => void) | null;
+  generatingPresentation: GeneratingPresentation | null;
 }
 
 interface GenerationStoreActions {
@@ -31,6 +43,13 @@ interface GenerationStoreActions {
   setUsedQuestions: (updater: Question[] | ((prev: Question[]) => Question[])) => void;
   setGenerationInProgress: (generationInProgress: boolean) => void;
   setGenerationAbortController: (controller: AbortController | null) => void;
+  addGenerationLog: (entry: GenerationLogEntry) => void;
+  clearGenerationLogs: () => void;
+  setDebugPanelOpen: (open: boolean) => void;
+  setAutoScrollLogs: (enabled: boolean) => void;
+  ensureGenerationLogListener: () => Promise<void>;
+  stopGenerationLogListener: () => void;
+  setGeneratingPresentation: (presentation: GeneratingPresentation | null) => void;
   cancelGeneration: () => void;
   startQuizGeneration: () => Promise<void>;
   startFlashcardGeneration: () => Promise<void>;
@@ -60,6 +79,33 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
   setGenerationInProgress: (generationInProgress) => set({ generationInProgress }),
   generationAbortController: null,
   setGenerationAbortController: (generationAbortController) => set({ generationAbortController }),
+  generationLogs: [],
+  debugPanelOpen: false,
+  autoScrollLogs: true,
+  generationLogListenerReady: false,
+  generationLogUnlisten: null,
+  generatingPresentation: null,
+  setGeneratingPresentation: (generatingPresentation) => set({ generatingPresentation }),
+  addGenerationLog: (entry) =>
+    set((state) => ({
+      generationLogs: [...state.generationLogs, entry].slice(-MAX_GENERATION_LOGS),
+    })),
+  clearGenerationLogs: () => set({ generationLogs: [] }),
+  setDebugPanelOpen: (debugPanelOpen) => set({ debugPanelOpen }),
+  setAutoScrollLogs: (autoScrollLogs) => set({ autoScrollLogs }),
+  ensureGenerationLogListener: async () => {
+    const state = get();
+    if (state.generationLogListenerReady || !isTauri()) return;
+    const unlisten = await listen<GenerationLogEntry>(GENERATION_LOG_EVENT, (event) => {
+      useGenerationStore.getState().addGenerationLog(event.payload);
+    });
+    set({ generationLogListenerReady: true, generationLogUnlisten: unlisten });
+  },
+  stopGenerationLogListener: () => {
+    const state = get();
+    state.generationLogUnlisten?.();
+    set({ generationLogListenerReady: false, generationLogUnlisten: null });
+  },
   cancelGeneration: () => {
     get().generationAbortController?.abort();
   },
@@ -76,6 +122,12 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
       generationState.pdfSourcePath &&
       needsPreparedDocumentRefresh(generationState.preparedDocument?.extractionOptions, settingsState.settings.pdfExtraction)
     ) {
+      generationState.addGenerationLog({
+        stage: 'pdf.reextract',
+        message: 'PDF extraction ayarlari degistigi icin dokuman yeniden islenecek.',
+        level: 'info',
+        timestamp: Date.now(),
+      });
       generationState.setIsReadingPdf(true);
       try {
         const preparedDocument = await preparePdfDocumentFromPath(
@@ -84,8 +136,26 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
         );
         generationState.setPreparedDocument(preparedDocument);
         generationState.setPdfText(preparedDocument.fullText);
+        generationState.addGenerationLog({
+          stage: 'pdf.reextract',
+          message: 'PDF yeniden isleme tamamlandi.',
+          level: 'success',
+          timestamp: Date.now(),
+          meta: {
+            totalChars: preparedDocument.totalChars,
+            pageCount: preparedDocument.pages.length,
+            sourceMode: preparedDocument.sourceMode,
+          },
+        });
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'PDF yeniden islenemedi.');
+        generationState.addGenerationLog({
+          stage: 'pdf.reextract',
+          message: 'PDF yeniden isleme hata ile sonlandi.',
+          level: 'error',
+          timestamp: Date.now(),
+          meta: { error: getErrorMessage(error, 'PDF yeniden islenemedi.') },
+        });
+        toast.error(getErrorMessage(error, 'PDF yeniden islenemedi.'));
         return;
       } finally {
         generationState.setIsReadingPdf(false);
@@ -105,6 +175,8 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
         setLoadingMessage: generationState.setLoadingMessage,
         setGenerationInProgress: generationState.setGenerationInProgress,
         setGenerationAbortController: generationState.setGenerationAbortController,
+        addGenerationLog: generationState.addGenerationLog,
+        clearGenerationLogs: generationState.clearGenerationLogs,
         setQuizQuestions: (questions) => {
           useQuizSessionStore.getState().setQuizState({
             questions,
@@ -116,6 +188,7 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
         },
         setFlashcards: (flashcards) => useQuizSessionStore.getState().setFlashcards(flashcards),
         setUsedQuestions: generationState.setUsedQuestions,
+        setGeneratingPresentation: generationState.setGeneratingPresentation,
       }
     );
   },
@@ -132,6 +205,12 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
       generationState.pdfSourcePath &&
       needsPreparedDocumentRefresh(generationState.preparedDocument?.extractionOptions, settingsState.settings.pdfExtraction)
     ) {
+      generationState.addGenerationLog({
+        stage: 'pdf.reextract',
+        message: 'PDF extraction ayarlari degistigi icin dokuman yeniden islenecek.',
+        level: 'info',
+        timestamp: Date.now(),
+      });
       generationState.setIsReadingPdf(true);
       try {
         const preparedDocument = await preparePdfDocumentFromPath(
@@ -140,8 +219,26 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
         );
         generationState.setPreparedDocument(preparedDocument);
         generationState.setPdfText(preparedDocument.fullText);
+        generationState.addGenerationLog({
+          stage: 'pdf.reextract',
+          message: 'PDF yeniden isleme tamamlandi.',
+          level: 'success',
+          timestamp: Date.now(),
+          meta: {
+            totalChars: preparedDocument.totalChars,
+            pageCount: preparedDocument.pages.length,
+            sourceMode: preparedDocument.sourceMode,
+          },
+        });
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'PDF yeniden islenemedi.');
+        generationState.addGenerationLog({
+          stage: 'pdf.reextract',
+          message: 'PDF yeniden isleme hata ile sonlandi.',
+          level: 'error',
+          timestamp: Date.now(),
+          meta: { error: getErrorMessage(error, 'PDF yeniden islenemedi.') },
+        });
+        toast.error(getErrorMessage(error, 'PDF yeniden islenemedi.'));
         return;
       } finally {
         generationState.setIsReadingPdf(false);
@@ -161,6 +258,8 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
         setLoadingMessage: generationState.setLoadingMessage,
         setGenerationInProgress: generationState.setGenerationInProgress,
         setGenerationAbortController: generationState.setGenerationAbortController,
+        addGenerationLog: generationState.addGenerationLog,
+        clearGenerationLogs: generationState.clearGenerationLogs,
         setQuizQuestions: (questions) => {
           useQuizSessionStore.getState().setQuizState({
             questions,
@@ -172,6 +271,7 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
         },
         setFlashcards: (flashcards) => useQuizSessionStore.getState().setFlashcards(flashcards),
         setUsedQuestions: generationState.setUsedQuestions,
+        setGeneratingPresentation: generationState.setGeneratingPresentation,
       }
     );
   },

@@ -17,7 +17,8 @@ export const ConfigView: FC = () => {
       animate="visible"
       className="flex flex-col flex-1 min-h-0 h-full w-full max-w-7xl mx-auto px-3 md:px-4 gap-2 pb-2 md:pb-3 overflow-hidden"
     >
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 md:gap-4 items-stretch min-h-0 lg:flex-1 lg:min-h-0 lg:h-full lg:overflow-hidden">
+      <div className="relative grid grid-cols-1 lg:grid-cols-12 gap-3 md:gap-4 items-stretch min-h-0 lg:flex-1 lg:min-h-0 lg:h-full lg:overflow-hidden">
+        <div className="pointer-events-none absolute inset-0 -z-10 rounded-[2.2rem] bg-gradient-to-br from-white/22 via-transparent to-sand-200/15 dark:from-stone-900/30 dark:to-sand-900/40 blur-xl" />
         
         {/* LEFT COLUMN: Upload */}
         <div className="lg:col-span-4 min-h-0 flex flex-col lg:max-h-full lg:overflow-y-auto [scrollbar-gutter:stable]">
