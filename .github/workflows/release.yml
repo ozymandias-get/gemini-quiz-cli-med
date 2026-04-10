@@ -5,7 +5,7 @@
 # İzinler: Release oluşturma ve varlık yükleme için contents:write yeterlidir;
 #          GITHUB_TOKEN ile birlikte kullanılır (ek PAT gerekmez).
 #
-# Matris: ubuntu-22.04 (Linux: .deb, AppImage) ve windows-latest (NSIS .exe, MSI)
+# Matris: ubuntu-22.04 (Linux: .deb, .rpm; AppImage yok — CI'da linuxdeploy sık kırılır) ve windows-latest (NSIS, MSI)
 #         aynı anda çalışır; fail-fast: false ile biri hata verse diğeri iptal olmaz.
 #         İki job aynı tagName ile aynı GitHub Release'e varlık ekler.
 #

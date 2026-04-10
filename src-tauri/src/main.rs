@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod pdf_runtime;
+mod windows_process;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use pdf_runtime::{
@@ -57,7 +58,9 @@ fn kill_pid(pid: u32) -> std::io::Result<()> {
     }
     #[cfg(windows)]
     {
-        let status = Command::new("taskkill")
+        let mut cmd = Command::new("taskkill");
+        windows_process::configure_hidden_subprocess(&mut cmd);
+        let status = cmd
             .args(["/F", "/T", "/PID", &pid.to_string()])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -180,12 +183,14 @@ fn build_augmented_windows_path() -> Option<String> {
 }
 
 fn apply_windows_path(command: &mut Command) {
+    windows_process::configure_hidden_subprocess(command);
     if let Some(path) = build_augmented_windows_path() {
         command.env("PATH", path);
     }
 }
 
 fn apply_windows_path_tokio(command: &mut TokioCommand) {
+    windows_process::configure_hidden_subprocess_tokio(command);
     if let Some(path) = build_augmented_windows_path() {
         command.env("PATH", path);
     }

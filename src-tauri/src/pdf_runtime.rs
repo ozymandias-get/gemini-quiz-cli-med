@@ -338,7 +338,9 @@ fn resolve_java(app: &AppHandle) -> Result<ResolvedJava, String> {
             .and_then(|path| path.parent())
             .unwrap_or(&root)
             .to_path_buf();
-        let output = Command::new(&java_exe)
+        let mut java_cmd = Command::new(&java_exe);
+        crate::windows_process::configure_hidden_subprocess(&mut java_cmd);
+        let output = java_cmd
             .arg("-version")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -378,7 +380,9 @@ fn resolve_python() -> Result<ResolvedPython, String> {
     };
 
     for (program, prefix_args) in candidates {
-        let output = Command::new(&program)
+        let mut py_cmd = Command::new(&program);
+        crate::windows_process::configure_hidden_subprocess(&mut py_cmd);
+        let output = py_cmd
             .args(&prefix_args)
             .arg("--version")
             .stdout(Stdio::piped())
@@ -469,7 +473,9 @@ fn bootstrap_runtime_impl(app: &AppHandle) -> Result<PdfRuntimeStatus, String> {
                 "venvPath": runtime_paths.venv_dir.to_string_lossy()
             })),
         );
-        let status = Command::new(&python.program)
+        let mut venv_cmd = Command::new(&python.program);
+        crate::windows_process::configure_hidden_subprocess(&mut venv_cmd);
+        let status = venv_cmd
             .args(&python.prefix_args)
             .args(["-m", "venv"])
             .arg(&runtime_paths.venv_dir)
@@ -503,6 +509,7 @@ fn bootstrap_runtime_impl(app: &AppHandle) -> Result<PdfRuntimeStatus, String> {
             None,
         );
         let mut install = Command::new(&venv_python);
+        crate::windows_process::configure_hidden_subprocess(&mut install);
         with_command_env(&mut install, &java.java_home, &runtime_paths.cache_dir);
         let status = install
             .args([
@@ -670,6 +677,7 @@ fn start_hybrid_impl(
         .map_err(|e| format!("Hibrit log handle klonlanamadı: {e}"))?;
 
     let mut command = Command::new(cli_path);
+    crate::windows_process::configure_hidden_subprocess(&mut command);
     with_command_env(&mut command, &java.java_home, &runtime_paths.cache_dir);
     command
         .stdout(Stdio::from(stdout))
@@ -785,6 +793,7 @@ fn run_cli_capture(
 ) -> Result<(u128, String, String), String> {
     let started_at = now_millis();
     let mut command = Command::new(cli_path);
+    crate::windows_process::configure_hidden_subprocess(&mut command);
     with_command_env(&mut command, java_home, cache_dir);
     command.args(args);
     let output = command
